@@ -6,6 +6,7 @@
     <title>Synapse Call</title>
     <script src="/socket.io/socket.io.js"></script>
     <head>
+    <head>
     <style>
         :root {
             --dark-bg: #121212;
@@ -26,11 +27,22 @@
         #unpinned-bar { width: 100%; height: 15%; display: flex; justify-content: center; align-items: center; gap: 0.5rem; padding-bottom: 5px; }
         .video-container.unpinned { height: 100%; width: auto; aspect-ratio: 16 / 9; flex-shrink: 0; }
 
-        video { width: 100%; height: 100%; object-fit: contain; transform: scaleX(-1); }
+        /* --- THE DEFINITIVE FIX --- */
+        /* By default, no videos are mirrored. */
+        video { 
+            width: 100%; 
+            height: 100%; 
+            object-fit: contain; 
+        }
         
-        /* --- THIS IS THE FIX --- */
-        video.screen-share { 
-            transform: scaleX(1); /* Un-mirrors the video */
+        /* ONLY mirror the local video feed. */
+        #local-video {
+            transform: scaleX(-1);
+        }
+
+        /* When the local video is a screen share, UN-MIRROR it. */
+        #local-video.screen-share { 
+            transform: scaleX(1); 
         }
 
         .username-overlay { position: absolute; bottom: 8px; left: 8px; background: rgba(0,0,0,0.6); padding: 5px 10px; border-radius: 6px; z-index: 10; }
