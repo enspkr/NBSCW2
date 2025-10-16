@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Connection Test</title>
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body style="background-color: #121212; color: white; font-family: sans-serif;">
+    <h1>Testing Real-Time Connection...</h1>
+    <p>Check the developer console (F12) for messages.</p>
+
+    <script>
+        const token = localStorage.getItem('synapse-token');
+        if (!token) {
+            document.body.innerHTML = '<h1>Error: No token found. Please log in again.</h1>';
+        } else {
+            const socket = io({
+                auth: { token }
+            });
+
+            socket.on('connect', () => {
+                console.log('%c✅ SUCCESS: Connected to the server!', 'color: limegreen; font-weight: bold;');
+            });
+
+            socket.on('hello', (message) => {
+                console.log(`✅ SUCCESS: Received message: "${message}"`);
+                document.body.innerHTML = '<h1>Connection Successful!</h1>';
+            });
+
+            socket.on('connect_error', (err) => {
+                console.error('❌ FAILED: Could not connect.', err.message);
+                document.body.innerHTML = `<h1>Connection Failed: ${err.message}</h1>`;
+            });
+        }
+    </script>
+</body>
+</html>

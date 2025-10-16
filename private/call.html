@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Synapse Call</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        :root {
+            --dark-bg: #121212;
+            --primary-accent: #007acc;
+            --secondary-surface: #2a2a2a;
+            --red-accent: #d93025;
+            --red-accent-hover: #a52714;
+        }
+        body { background-color: var(--dark-bg); color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; height: 100vh; width: 100vw; overflow: hidden; }
+        .main-content { height: 100%; width: 100%; display: flex; }
+        
+        #video-grid { flex-grow: 1; display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 1rem; padding: 1rem; padding-bottom: 120px; box-sizing: border-box; transition: all 0.4s ease-in-out; }
+        #video-grid.pinned-mode { display: flex; flex-direction: column; gap: 0.5rem; }
+        
+        .video-container { position: relative; background-color: black; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; transition: all 0.4s ease-in-out; }
+        .video-container.pinned { flex-grow: 1; height: 85%; }
+
+        #unpinned-bar { width: 100%; height: 15%; display: flex; justify-content: center; align-items: center; gap: 0.5rem; padding-bottom: 5px; }
+        .video-container.unpinned { height: 100%; width: auto; aspect-ratio: 16 / 9; flex-shrink: 0; }
+
+        video { width: 100%; height: 100%; object-fit: contain; transform: scaleX(-1); }
+        video.screen-share { transform: scaleX(1); }
+        .username-overlay { position: absolute; bottom: 8px; left: 8px; background: rgba(0,0,0,0.6); padding: 5px 10px; border-radius: 6px; z-index: 10; }
+        #local-video-container { border: 2px solid var(--primary-accent); }
+
+        .pin-btn { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; background-color: rgba(0,0,0,0.6); border: none; border-radius: 6px; cursor: pointer; z-index: 10; display: flex; align-items: center; justify-content: center; color: white; opacity: 0; transition: opacity 0.2s ease; }
+        .video-container:hover .pin-btn { opacity: 1; }
+
+        /* --- NEW: Style for the mute icon --- */
+        .mute-indicator {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            width: 32px;
+            height: 32px;
+            background-color: rgba(217, 48, 37, 0.8);
+            border-radius: 6px;
+            z-index: 10;
+            display: none; /* Hidden by default */
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+        .mute-indicator.visible {
+            display: flex; /* Shown when active */
+        }
+
+        #controls { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background-color: var(--secondary-surface); padding: 0.75rem; display: flex; gap: 0.75rem; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); z-index: 100; }
+        #controls button { padding: 0.75rem 1.5rem; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; background-color: #4a4a4a; color: white; transition: background-color 0.2s ease, transform 0.1s ease; white-space: nowrap; }
+        #controls button:hover { background-color: #5a5a5a; }
+        #controls button:active { transform: scale(0.95); }
+        #controls button.active { background-color: var(--red-accent); }
+        #hangup-btn { background-color: var(--red-accent); }
+        #hangup-btn:hover { background-color: var(--red-accent-hover); }
+    </style>
+</head>
+<body>
+    <main class="main-content">
+        <div id="video-grid">
+            <div class="video-container" id="local-video-container">
+                <video id="local-video" autoplay muted playsinline></video>
+                <div class="username-overlay">You</div>
+            </div>
+        </div>
+    </main>
+
+    <div id="controls">
+        <button id="mute-btn">Mute Mic</button>
+        <button id="camera-btn">Turn Camera Off</button>
+        <button id="screen-share-btn">Share Screen</button>
+        <button id="hangup-btn">Hang Up</button>
+    </div>
+
+    <script>
+        const videoGrid = document.getElementById('video-grid');
+        const localVideo = document.getElementById('local-video');
+        const peerConnections = {};
+        let localStream, screenStream;
+        let isScreenSharing = false;
+
+        function togglePin(containerToPin) {
+            const isAlreadyPinned = containerToPin.classList.contains('pinned');
+            videoGrid.classList.remove('pinned-mode');
+            document.querySelectorAll('.video-container').forEach(c => {
+                c.classList.remove('pinned', 'unpinned');
+                if (c.parentElement.id === 'unpinned-bar') {
+                    videoGrid.appendChild(c);
+                }
+            });
+            const unpinnedBar = document.getElementById('unpinned-bar');
+            if (unpinnedBar) unpinnedBar.remove();
+            
+            if (!isAlreadyPinned) {
+                videoGrid.classList.add('pinned-mode');
+                const newUnpinnedBar = document.createElement('div');
+                newUnpinnedBar.id = 'unpinned-bar';
+                document.querySelectorAll('.video-container').forEach(c => {
+                    if (c === containerToPin) {
+                        c.classList.add('pinned');
+                    } else {
+                        c.classList.add('unpinned');
+                        newUnpinnedBar.appendChild(c);
+                    }
+                });
+                videoGrid.appendChild(newUnpinnedBar);
+            }
+        }
+
+        function addPinButton(videoContainer) {
+            const pinBtn = document.createElement('button');
+            pinBtn.className = 'pin-btn';
+            pinBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17.5V22M10 17.5h4M12 2a5 5 0 0 0-5 5c0 4.42 5 9.5 5 9.5s5-5.08 5-9.5a5 5 0 0 0-5-5z"/></svg>`;
+            pinBtn.title = 'Pin Video';
+            pinBtn.onclick = (e) => {
+                e.stopPropagation();
+                togglePin(videoContainer);
+            };
+            videoContainer.appendChild(pinBtn);
+        }
+
+        // --- NEW: Helper function to toggle the mute icon ---
+        function setMuteIndicator(container, isMuted) {
+            let indicator = container.querySelector('.mute-indicator');
+            if (!indicator) {
+                indicator = document.createElement('div');
+                indicator.className = 'mute-indicator';
+                indicator.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"></path><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>`;
+                container.appendChild(indicator);
+            }
+            indicator.classList.toggle('visible', isMuted);
+        }
+
+        async function main() {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                localVideo.srcObject = localStream;
+                addPinButton(document.getElementById('local-video-container'));
+
+                const token = localStorage.getItem('synapse-token');
+                if (!token) { window.location.href = '/'; return; }
+                const socket = io({ auth: { token } });
+
+                // --- Signaling Listeners (Unchanged from your version) ---
+                socket.on('existing-users', (users) => { for (const [socketId, username] of Object.entries(users)) { createPeerConnection(socketId, true, username, socket); } });
+                socket.on('user-joined', (socketId, username) => { createPeerConnection(socketId, false, username, socket); });
+                socket.on('webrtc-offer', (fromSocketId, offer) => { const pc = peerConnections[fromSocketId]; if (pc) { pc.setRemoteDescription(new RTCSessionDescription(offer)).then(() => pc.createAnswer()).then(answer => pc.setLocalDescription(answer)).then(() => socket.emit('webrtc-answer', fromSocketId, pc.localDescription)); } });
+                socket.on('webrtc-answer', (fromSocketId, answer) => { const pc = peerConnections[fromSocketId]; if (pc) pc.setRemoteDescription(new RTCSessionDescription(answer)); });
+                socket.on('webrtc-ice-candidate', (fromSocketId, candidate) => { const pc = peerConnections[fromSocketId]; if (pc) pc.addIceCandidate(new RTCIceCandidate(candidate)); });
+                socket.on('user-left', (socketId) => { if (peerConnections[socketId]) { peerConnections[socketId].close(); delete peerConnections[socketId]; } const containerToRemove = document.getElementById(socketId); if (containerToRemove) { if (containerToRemove.classList.contains('pinned')) { togglePin(containerToRemove); } containerToRemove.remove(); } });
+
+                // --- NEW: Mute Status Listener ---
+                socket.on('user-mute-status', (socketId, isMuted) => {
+                    const container = document.getElementById(socketId);
+                    if (container) setMuteIndicator(container, isMuted);
+                });
+
+                // --- MODIFIED: Mute Button Logic ---
+                const muteBtn = document.getElementById('mute-btn');
+                muteBtn.addEventListener('click', () => {
+                    const audioTrack = localStream.getAudioTracks()[0];
+                    if (audioTrack) {
+                        audioTrack.enabled = !audioTrack.enabled;
+                        const isMuted = !audioTrack.enabled;
+                        muteBtn.textContent = isMuted ? 'Unmute Mic' : 'Mute Mic';
+                        muteBtn.classList.toggle('active', isMuted);
+                        setMuteIndicator(document.getElementById('local-video-container'), isMuted);
+                        socket.emit('mute-status-changed', { isMuted });
+                    }
+                });
+                
+                // --- Other Controls (Unchanged from your version) ---
+                const cameraBtn = document.getElementById('camera-btn');
+                cameraBtn.addEventListener('click', () => { if (isScreenSharing) return; const videoTrack = localStream.getVideoTracks()[0]; if (videoTrack) { videoTrack.enabled = !videoTrack.enabled; cameraBtn.textContent = videoTrack.enabled ? 'Turn Camera Off' : 'Turn Camera On'; cameraBtn.classList.toggle('active', !videoTrack.enabled); } });
+                document.getElementById('screen-share-btn').addEventListener('click', () => toggleScreenShare(socket));
+                document.getElementById('hangup-btn').addEventListener('click', () => { window.location.href = '/'; });
+            } catch (err) { console.error("Fatal Error:", err); }
+        }
+
+        function createPeerConnection(socketId, isInitiator, username, socket) {
+            const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+            peerConnections[socketId] = pc;
+            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+            pc.onicecandidate = (event) => { if (event.candidate) { socket.emit('webrtc-ice-candidate', socketId, event.candidate); } };
+            pc.ontrack = (event) => {
+                let videoContainer = document.getElementById(socketId);
+                if (!videoContainer) {
+                    videoContainer = document.createElement('div');
+                    videoContainer.id = socketId;
+                    videoContainer.className = 'video-container';
+                    const remoteVideo = document.createElement('video');
+                    remoteVideo.autoplay = true;
+                    remoteVideo.playsInline = true;
+                    const usernameDiv = document.createElement('div');
+                    usernameDiv.className = 'username-overlay';
+                    usernameDiv.textContent = username;
+                    videoContainer.appendChild(remoteVideo);
+                    videoContainer.appendChild(usernameDiv);
+                    addPinButton(videoContainer);
+                    videoGrid.appendChild(videoContainer);
+                }
+                videoContainer.querySelector('video').srcObject = event.streams[0];
+            };
+            if (isInitiator) { pc.createOffer().then(offer => pc.setLocalDescription(offer)).then(() => socket.emit('webrtc-offer', socketId, pc.localDescription)); }
+        }
+
+        async function toggleScreenShare(socket) {
+            const screenShareBtn = document.getElementById('screen-share-btn');
+            if (!isScreenSharing) {
+                try {
+                    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true});
+                    isScreenSharing = true;
+                    localVideo.srcObject = screenStream;
+                    localVideo.classList.add('screen-share');
+                    await replaceTrack(screenStream.getVideoTracks()[0]);
+                    screenShareBtn.textContent = 'Stop Sharing';
+                    screenShareBtn.classList.add('active');
+                    screenStream.getVideoTracks()[0].onended = () => {
+                        if (isScreenSharing) {
+                            toggleScreenShare(socket);
+                        }
+                    };
+                } catch (err) {
+                    console.error("Screen share error", err);
+                    isScreenSharing = false;
+                }
+            } else {
+                isScreenSharing = false;
+                localVideo.srcObject = localStream;
+                localVideo.classList.remove('screen-share');
+                await replaceTrack(localStream.getVideoTracks()[0]);
+                screenStream.getTracks().forEach(track => track.stop());
+                screenShareBtn.textContent = 'Share Screen';
+                screenShareBtn.classList.remove('active');
+            }
+        }
+
+        async function replaceTrack(newTrack) {
+            for (const pc of Object.values(peerConnections)) {
+                const sender = pc.getSenders().find(s => s.track.kind === 'video');
+                if (sender) {
+                    await sender.replaceTrack(newTrack);
+                }
+            }
+        }
+        
+        main();
+    </script>
+</body>
+</html>
