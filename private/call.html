@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Synapse Call</title>
     <script src="/socket.io/socket.io.js"></script>
+    <head>
     <style>
         :root {
             --dark-bg: #121212;
@@ -26,31 +27,20 @@
         .video-container.unpinned { height: 100%; width: auto; aspect-ratio: 16 / 9; flex-shrink: 0; }
 
         video { width: 100%; height: 100%; object-fit: contain; transform: scaleX(-1); }
-        video.screen-share { transform: scaleX(1); }
+        
+        /* --- THIS IS THE FIX --- */
+        video.screen-share { 
+            transform: scaleX(1); /* Un-mirrors the video */
+        }
+
         .username-overlay { position: absolute; bottom: 8px; left: 8px; background: rgba(0,0,0,0.6); padding: 5px 10px; border-radius: 6px; z-index: 10; }
         #local-video-container { border: 2px solid var(--primary-accent); }
 
         .pin-btn { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; background-color: rgba(0,0,0,0.6); border: none; border-radius: 6px; cursor: pointer; z-index: 10; display: flex; align-items: center; justify-content: center; color: white; opacity: 0; transition: opacity 0.2s ease; }
         .video-container:hover .pin-btn { opacity: 1; }
 
-        /* --- NEW: Style for the mute icon --- */
-        .mute-indicator {
-            position: absolute;
-            top: 8px;
-            left: 8px;
-            width: 32px;
-            height: 32px;
-            background-color: rgba(217, 48, 37, 0.8);
-            border-radius: 6px;
-            z-index: 10;
-            display: none; /* Hidden by default */
-            align-items: center;
-            justify-content: center;
-            color: white;
-        }
-        .mute-indicator.visible {
-            display: flex; /* Shown when active */
-        }
+        .mute-indicator { position: absolute; top: 8px; left: 8px; width: 32px; height: 32px; background-color: rgba(217, 48, 37, 0.8); border-radius: 6px; z-index: 10; display: none; align-items: center; justify-content: center; color: white; }
+        .mute-indicator.visible { display: flex; }
 
         #controls { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background-color: var(--secondary-surface); padding: 0.75rem; display: flex; gap: 0.75rem; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); z-index: 100; }
         #controls button { padding: 0.75rem 1.5rem; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; background-color: #4a4a4a; color: white; transition: background-color 0.2s ease, transform 0.1s ease; white-space: nowrap; }
@@ -184,7 +174,20 @@
         }
 
         function createPeerConnection(socketId, isInitiator, username, socket) {
-            const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+            const pc = new RTCPeerConnection({
+                iceServers: [
+                    { 
+                        urls: 'stun:stun.l.google.com:19302' // The STUN server (for direct connections)
+                    },
+                    {
+                        // A free, public TURN server for testing and development
+                        urls: 'turn:global.turn.twilio.com:3478?transport=udp',
+                        username: '7b73723165731b74730b206a6a2a2b72',
+                        credential: 'password'
+                    }
+                ]
+            });
+
             peerConnections[socketId] = pc;
             localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
             pc.onicecandidate = (event) => { if (event.candidate) { socket.emit('webrtc-ice-candidate', socketId, event.candidate); } };
@@ -192,16 +195,13 @@
                 let videoContainer = document.getElementById(socketId);
                 if (!videoContainer) {
                     videoContainer = document.createElement('div');
-                    videoContainer.id = socketId;
-                    videoContainer.className = 'video-container';
+                    videoContainer.id = socketId; videoContainer.className = 'video-container';
                     const remoteVideo = document.createElement('video');
-                    remoteVideo.autoplay = true;
-                    remoteVideo.playsInline = true;
+                    remoteVideo.autoplay = true; remoteVideo.playsInline = true;
                     const usernameDiv = document.createElement('div');
                     usernameDiv.className = 'username-overlay';
                     usernameDiv.textContent = username;
-                    videoContainer.appendChild(remoteVideo);
-                    videoContainer.appendChild(usernameDiv);
+                    videoContainer.appendChild(remoteVideo); videoContainer.appendChild(usernameDiv);
                     addPinButton(videoContainer);
                     videoGrid.appendChild(videoContainer);
                 }
@@ -214,7 +214,7 @@
             const screenShareBtn = document.getElementById('screen-share-btn');
             if (!isScreenSharing) {
                 try {
-                    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true});
+                    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, });
                     isScreenSharing = true;
                     localVideo.srcObject = screenStream;
                     localVideo.classList.add('screen-share');
