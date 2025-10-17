@@ -430,13 +430,37 @@
             const pc = new RTCPeerConnection({ iceServers: [ { urls: 'stun:stun.l.google.com:19302' }, { urls: 'turn:global.turn.twilio.com:3478?transport=udp', username: '7b73723165731b74730b206a6a2a2b72', credential: 'password' } ] });
             peerConnections[socketId] = pc;
             
-            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+            // --- NEW, SMARTER LOGIC ---
+            // Instead of just adding all tracks from localStream, we add the correct ones.
 
-            // This event fires for EACH incoming track
+            // 1. Always send the microphone audio from our original stream.
+            if (localStream.getAudioTracks().length > 0) {
+                pc.addTrack(localStream.getAudioTracks()[0], localStream);
+            }
+
+            // 2. Check if we are currently screen sharing.
+            if (isScreenSharing) {
+                // If so, send the screen's video track.
+                if (screenStream.getVideoTracks().length > 0) {
+                    pc.addTrack(screenStream.getVideoTracks()[0], localStream); // Use localStream as the stream identifier
+                }
+                // And if the screen share has its own audio, send that too.
+                if (screenStream.getAudioTracks().length > 0) {
+                    pc.addTrack(screenStream.getAudioTracks()[0], localStream);
+                }
+            } else {
+                // Otherwise, just send the camera's video track.
+                if (localStream.getVideoTracks().length > 0) {
+                    pc.addTrack(localStream.getVideoTracks()[0], localStream);
+                }
+            }
+
+            // --- The rest of the function is unchanged ---
+            pc.onicecandidate = (event) => { if (event.candidate) { socket.emit('webrtc-ice-candidate', socketId, event.candidate); } };
+            
             pc.ontrack = (event) => {
                 let videoContainer = document.getElementById(socketId);
                 
-                // If this is the first track, create all the necessary elements
                 if (!videoContainer) {
                     videoContainer = document.createElement('div');
                     videoContainer.id = socketId;
@@ -446,14 +470,13 @@
                     remoteVideo.autoplay = true;
                     remoteVideo.playsInline = true;
 
-                    // Create the INVISIBLE audio element just for the microphone
                     const micAudio = document.createElement('audio');
                     micAudio.autoplay = true;
                     micAudio.className = 'mic-audio';
 
                     const usernameDiv = document.createElement('div');
                     usernameDiv.className = 'username-overlay';
-                    usernameDiv.textContent = userData.username; // Use userData object
+                    usernameDiv.textContent = userData.username;
                     
                     videoContainer.appendChild(remoteVideo);
                     videoContainer.appendChild(micAudio);
@@ -462,51 +485,20 @@
                     addPinButton(videoContainer);
                     addClientMuteControls(videoContainer);
                     videoGrid.appendChild(videoContainer);
-
-                    // Set initial mute status for the user
                     setMuteIndicator(videoContainer, userData.isMuted);
                 }
 
-                // Direct the track to the correct element
                 const videoEl = videoContainer.querySelector('video');
                 const audioEl = videoContainer.querySelector('.mic-audio');
 
                 if (event.track.kind === 'video') {
                     videoEl.srcObject = new MediaStream([event.track]);
                 } else if (event.track.kind === 'audio') {
-                    // We assume the FIRST audio track is the mic.
-                    if (!audioEl.srcObject) { 
+                    if (!audioEl.srcObject) {
                         const micStream = new MediaStream([event.track]);
                         audioEl.srcObject = micStream;
-
-                        // --- ATTACH THE "WHO'S TALKING" INDICATOR ONLY TO THE MIC STREAM ---
-                        const audioContext = new AudioContext();
-                        const analyser = audioContext.createAnalyser();
-                        analyser.fftSize = 256;
-                        const source = audioContext.createMediaStreamSource(micStream);
-                        source.connect(analyser);
-
-                        const dataArray = new Uint8Array(analyser.frequencyBinCount);
-                        
-                        if (audioAnalyzers[socketId]) {
-                            cancelAnimationFrame(audioAnalyzers[socketId].loopId);
-                        }
-
-                        function checkVolume() {
-                            analyser.getByteFrequencyData(dataArray);
-                            const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
-                            
-                            // A simple threshold for speaking
-                            if (average > 15) { // You can adjust this threshold
-                                videoContainer.classList.add('is-speaking');
-                            } else {
-                                videoContainer.classList.remove('is-speaking');
-                            }
-                            audioAnalyzers[socketId].loopId = requestAnimationFrame(checkVolume);
-                        }
-                        audioAnalyzers[socketId] = { loopId: requestAnimationFrame(checkVolume) };
-
-                    } else { // The SECOND audio track must be the screen share audio.
+                        setupSpeakingIndicator(videoContainer, micStream, socketId);
+                    } else {
                         if (videoEl.srcObject) {
                             videoEl.srcObject.addTrack(event.track);
                         }
@@ -514,7 +506,6 @@
                 }
             };
 
-            pc.onicecandidate = (event) => { if (event.candidate) { socket.emit('webrtc-ice-candidate', socketId, event.candidate); } };
             if (isInitiator) { pc.createOffer().then(offer => pc.setLocalDescription(offer)).then(() => socket.emit('webrtc-offer', socketId, pc.localDescription)); }
         }
         async function toggleScreenShare(isHD, socket) {
