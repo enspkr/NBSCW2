@@ -226,13 +226,24 @@
             const screenShareBtn = document.getElementById('screen-share-btn');
             if (!isScreenSharing) {
                 try {
-                    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, });
+                    // THIS IS THE CRITICAL CHANGE: Requesting audio
+                    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
                     isScreenSharing = true;
+                    
                     localVideo.srcObject = screenStream;
-                    localVideo.classList.add('screen-share');
+                    localVideo.style.transform = 'scaleX(1)'; // Un-mirror for screen share
+                    
+                    // Replace the video track for all peers
                     await replaceTrack(screenStream.getVideoTracks()[0]);
+
+                    // If the user shared audio, also replace the audio track
+                    if (screenStream.getAudioTracks().length > 0) {
+                        await replaceTrack(screenStream.getAudioTracks()[0]);
+                    }
+                    
                     screenShareBtn.textContent = 'Stop Sharing';
                     screenShareBtn.classList.add('active');
+                    
                     screenStream.getVideoTracks()[0].onended = () => {
                         if (isScreenSharing) {
                             toggleScreenShare(socket);
@@ -244,10 +255,16 @@
                 }
             } else {
                 isScreenSharing = false;
+                
                 localVideo.srcObject = localStream;
-                localVideo.classList.remove('screen-share');
+                localVideo.style.transform = 'scaleX(-1)'; // Re-mirror for camera
+                
+                // Send the original camera and mic tracks back to all peers
                 await replaceTrack(localStream.getVideoTracks()[0]);
+                await replaceTrack(localStream.getAudioTracks()[0]);
+                
                 screenStream.getTracks().forEach(track => track.stop());
+                
                 screenShareBtn.textContent = 'Share Screen';
                 screenShareBtn.classList.remove('active');
             }
@@ -255,8 +272,10 @@
 
         async function replaceTrack(newTrack) {
             for (const pc of Object.values(peerConnections)) {
-                const sender = pc.getSenders().find(s => s.track.kind === 'video');
+                // Find the sender responsible for that type of track (video or audio)
+                const sender = pc.getSenders().find(s => s.track && s.track.kind === newTrack.kind);
                 if (sender) {
+                    // Seamlessly replace the track being sent
                     await sender.replaceTrack(newTrack);
                 }
             }
