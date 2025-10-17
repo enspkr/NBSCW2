@@ -306,20 +306,28 @@
                 socket.on('webrtc-offer', (fromSocketId, offer) => { const pc = peerConnections[fromSocketId]; if (pc) { pc.setRemoteDescription(new RTCSessionDescription(offer)).then(() => pc.createAnswer()).then(answer => pc.setLocalDescription(answer)).then(() => socket.emit('webrtc-answer', fromSocketId, pc.localDescription)); } });
                 socket.on('webrtc-answer', (fromSocketId, answer) => { const pc = peerConnections[fromSocketId]; if (pc) pc.setRemoteDescription(new RTCSessionDescription(answer)); });
                 socket.on('webrtc-ice-candidate', (fromSocketId, candidate) => { const pc = peerConnections[fromSocketId]; if (pc) pc.addIceCandidate(new RTCIceCandidate(candidate)); });
-                socket.on('user-left', (socketId) => { 
-                    if (peerConnections[socketId]) { /* ... */ } 
-                    const containerToRemove = document.getElementById(socketId); 
-                    if (containerToRemove) { /* ... */ }
-
-                    // --- ADD THIS CLEANUP LOGIC ---
+                socket.on('user-left', (socketId) => {
+                    // 1. Stop the audio analysis loop first to prevent errors
                     if (audioAnalyzers[socketId]) {
                         cancelAnimationFrame(audioAnalyzers[socketId].loopId);
                         delete audioAnalyzers[socketId];
                     }
-                });
-                socket.on('user-mute-status', (socketId, isMuted) => {
-                    const container = document.getElementById(socketId);
-                    if (container) setMuteIndicator(container, isMuted);
+
+                    // 2. Close the WebRTC connection
+                    if (peerConnections[socketId]) {
+                        peerConnections[socketId].close();
+                        delete peerConnections[socketId];
+                    }
+
+                    // 3. Find and remove the video container from the screen
+                    const containerToRemove = document.getElementById(socketId);
+                    if (containerToRemove) {
+                        // If the user who left was the one pinned, reset the layout
+                        if (containerToRemove.classList.contains('pinned')) {
+                            togglePin(containerToRemove); // This just unpins everyone
+                        }
+                        containerToRemove.remove();
+                    }
                 });
 
                 // Step 4: Set up controls.
