@@ -10,6 +10,7 @@
     <style>
         :root {
             --dark-bg: #121212;
+            --primary-accent: #007acc;
             --secondary-surface: #2a2a2a;
             --red-accent: #d93025;
             --red-accent-hover: #a52714;
@@ -45,13 +46,28 @@
         }
 
         .username-overlay { position: absolute; bottom: 8px; left: 8px; background: rgba(0,0,0,0.6); padding: 5px 10px; border-radius: 6px; z-index: 10; }
-        #local-video-container { border: 2px solid var(--primary-accent); }
+        
 
         .pin-btn { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; background-color: rgba(0,0,0,0.6); border: none; border-radius: 6px; cursor: pointer; z-index: 10; display: flex; align-items: center; justify-content: center; color: white; opacity: 0; transition: opacity 0.2s ease; }
         .video-container:hover .pin-btn { opacity: 1; }
 
-        .mute-indicator { position: absolute; top: 8px; left: 8px; width: 32px; height: 32px; background-color: rgba(217, 48, 37, 0.8); border-radius: 6px; z-index: 10; display: none; align-items: center; justify-content: center; color: white; }
-        .mute-indicator.visible { display: flex; }
+        .mute-indicator {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            width: 32px;
+            height: 32px;
+            background-color: rgba(217, 48, 37, 0.8);
+            border-radius: 6px;
+            z-index: 10;
+            display: none; /* Hidden by default */
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+        .mute-indicator.visible {
+            display: flex; /* Shown when active */
+        }
 
         #controls { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background-color: var(--secondary-surface); padding: 0.75rem; display: flex; gap: 0.75rem; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); z-index: 100; }
         #controls button { padding: 0.75rem 1.5rem; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; background-color: #4a4a4a; color: white; transition: background-color 0.2s ease, transform 0.1s ease; white-space: nowrap; }
@@ -123,7 +139,6 @@
         /* --- NEW: Style for the speaking indicator --- */
         .video-container.is-speaking {
             border: 3px solid #007acc; /* A bright blue glow */
-            box-shadow: 0 0 15px #007acc;
         }
     </style>
 </head>
@@ -179,6 +194,17 @@
                 videoGrid.appendChild(newUnpinnedBar);
             }
         }
+        
+        function setMuteIndicator(container, isMuted) {
+            let indicator = container.querySelector('.mute-indicator');
+            if (!indicator) {
+                indicator = document.createElement('div');
+                indicator.className = 'mute-indicator';
+                indicator.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5z"></path><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>`;
+                container.appendChild(indicator);
+            }
+            indicator.classList.toggle('visible', isMuted);
+        }
 
         function addPinButton(videoContainer) {
             const pinBtn = document.createElement('button');
@@ -217,8 +243,14 @@
                 const socket = io({ auth: { token } });
 
                 // Step 3: Set up all signaling listeners.
-                socket.on('existing-users', (users) => { for (const [socketId, username] of Object.entries(users)) { createPeerConnection(socketId, true, username, socket); } });
-                socket.on('user-joined', (socketId, username) => { createPeerConnection(socketId, false, username, socket); });
+                socket.on('existing-users', (users) => {
+                    for (const [socketId, userData] of Object.entries(users)) {
+                        createPeerConnection(socketId, true, userData, socket);
+                    }
+                });
+                socket.on('user-joined', (socketId, userData) => {
+                    createPeerConnection(socketId, false, userData, socket);
+                });
                 socket.on('webrtc-offer', (fromSocketId, offer) => { const pc = peerConnections[fromSocketId]; if (pc) { pc.setRemoteDescription(new RTCSessionDescription(offer)).then(() => pc.createAnswer()).then(answer => pc.setLocalDescription(answer)).then(() => socket.emit('webrtc-answer', fromSocketId, pc.localDescription)); } });
                 socket.on('webrtc-answer', (fromSocketId, answer) => { const pc = peerConnections[fromSocketId]; if (pc) pc.setRemoteDescription(new RTCSessionDescription(answer)); });
                 socket.on('webrtc-ice-candidate', (fromSocketId, candidate) => { const pc = peerConnections[fromSocketId]; if (pc) pc.addIceCandidate(new RTCIceCandidate(candidate)); });
@@ -233,10 +265,24 @@
                         delete audioAnalyzers[socketId];
                     }
                 });
+                socket.on('user-mute-status', (socketId, isMuted) => {
+                    const container = document.getElementById(socketId);
+                    if (container) setMuteIndicator(container, isMuted);
+                });
 
                 // Step 4: Set up controls.
                 const muteBtn = document.getElementById('mute-btn');
-                muteBtn.addEventListener('click', () => { const audioTrack = localStream.getAudioTracks()[0]; if (audioTrack) { audioTrack.enabled = !audioTrack.enabled; const isMuted = !audioTrack.enabled; muteBtn.textContent = isMuted ? 'Unmute Mic' : 'Mute Mic'; muteBtn.classList.toggle('active', isMuted); setMuteIndicator(document.getElementById('local-video-container'), isMuted); socket.emit('mute-status-changed', { isMuted }); } });
+                muteBtn.addEventListener('click', () => {
+                    const audioTrack = localStream.getAudioTracks()[0];
+                    if (audioTrack) {
+                        audioTrack.enabled = !audioTrack.enabled;
+                        const isMuted = !audioTrack.enabled;
+                        muteBtn.textContent = isMuted ? 'Unmute Mic' : 'Mute Mic';
+                        muteBtn.classList.toggle('active', isMuted);
+                        setMuteIndicator(document.getElementById('local-video-container'), isMuted);
+                        socket.emit('mute-status-changed', { isMuted });
+                    }
+                });
                 
                 const cameraBtn = document.getElementById('camera-btn');
                 cameraBtn.addEventListener('click', () => { if (isScreenSharing) return; const videoTrack = localStream.getVideoTracks()[0]; if (videoTrack) { videoTrack.enabled = !videoTrack.enabled; cameraBtn.textContent = videoTrack.enabled ? 'Turn Camera Off' : 'Turn Camera On'; cameraBtn.classList.toggle('active', !videoTrack.enabled); } });
@@ -320,7 +366,7 @@
             controlsContainer.appendChild(muteStreamBtn);
             videoContainer.appendChild(controlsContainer);
         }
-        function createPeerConnection(socketId, isInitiator, username, socket) {
+        function createPeerConnection(socketId, isInitiator, userData, socket) {
             const pc = new RTCPeerConnection({ iceServers: [ { urls: 'stun:stun.l.google.com:19302' }, { urls: 'turn:global.turn.twilio.com:3478?transport=udp', username: '7b73723165731b74730b206a6a2a2b72', credential: 'password' } ] });
             peerConnections[socketId] = pc;
             
@@ -340,12 +386,13 @@
                     remoteVideo.playsInline = true;
                     const usernameDiv = document.createElement('div');
                     usernameDiv.className = 'username-overlay';
-                    usernameDiv.textContent = username;
+                    usernameDiv.textContent = userData.username;
                     videoContainer.appendChild(remoteVideo);
                     videoContainer.appendChild(usernameDiv);
                     addPinButton(videoContainer);
                     addClientMuteControls(videoContainer);
                     videoGrid.appendChild(videoContainer);
+                    setMuteIndicator(videoContainer, userData.isMuted);
                 }
 
                 const videoEl = videoContainer.querySelector('video');

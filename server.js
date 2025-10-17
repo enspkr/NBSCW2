@@ -64,13 +64,25 @@ const activeUsers = {};
 io.on('connection', (socket) => {
     console.log(`✅ User connected: ${socket.user.username} (${socket.id})`);
     
+    // Tell the new user about everyone who is already here, including their mute status
     socket.emit('existing-users', activeUsers);
-    activeUsers[socket.id] = socket.user.username;
-    socket.broadcast.emit('user-joined', socket.id, socket.user.username);
+
+    // Add the new user to our list, defaulting to unmuted
+    const userData = { username: socket.user.username, isMuted: false };
+    activeUsers[socket.id] = userData;
+
+    // Tell everyone else that a new user has joined, sending the full user data object
+    socket.broadcast.emit('user-joined', socket.id, userData);
+
+    // Add a new listener for mute status changes
     socket.on('mute-status-changed', ({ isMuted }) => {
-        // Just relay the message to everyone else with the user's ID
-        socket.broadcast.emit('user-mute-status', socket.id, isMuted);
+        if (activeUsers[socket.id]) {
+            activeUsers[socket.id].isMuted = isMuted;
+            socket.broadcast.emit('user-mute-status', socket.id, isMuted);
+        }
     });
+
+    // The rest of your signaling listeners remain the same
     socket.on('webrtc-offer', (toSocketId, offer) => socket.to(toSocketId).emit('webrtc-offer', socket.id, offer));
     socket.on('webrtc-answer', (toSocketId, answer) => socket.to(toSocketId).emit('webrtc-answer', socket.id, answer));
     socket.on('webrtc-ice-candidate', (toSocketId, candidate) => socket.to(toSocketId).emit('webrtc-ice-candidate', socket.id, candidate));
