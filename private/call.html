@@ -372,81 +372,91 @@
             
             localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 
-            pc.onicecandidate = (event) => { if (event.candidate) { socket.emit('webrtc-ice-candidate', socketId, event.candidate); } };
-            
+            // This event fires for EACH incoming track
             pc.ontrack = (event) => {
                 let videoContainer = document.getElementById(socketId);
-                // Create the video container if it's the first track from this user
+                
+                // If this is the first track, create all the necessary elements
                 if (!videoContainer) {
                     videoContainer = document.createElement('div');
                     videoContainer.id = socketId;
                     videoContainer.className = 'video-container';
+                    
                     const remoteVideo = document.createElement('video');
                     remoteVideo.autoplay = true;
                     remoteVideo.playsInline = true;
+
+                    // Create the INVISIBLE audio element just for the microphone
+                    const micAudio = document.createElement('audio');
+                    micAudio.autoplay = true;
+                    micAudio.className = 'mic-audio';
+
                     const usernameDiv = document.createElement('div');
                     usernameDiv.className = 'username-overlay';
-                    usernameDiv.textContent = userData.username;
+                    usernameDiv.textContent = userData.username; // Use userData object
+                    
                     videoContainer.appendChild(remoteVideo);
+                    videoContainer.appendChild(micAudio);
                     videoContainer.appendChild(usernameDiv);
+                    
                     addPinButton(videoContainer);
                     addClientMuteControls(videoContainer);
                     videoGrid.appendChild(videoContainer);
+
+                    // Set initial mute status for the user
                     setMuteIndicator(videoContainer, userData.isMuted);
                 }
 
+                // Direct the track to the correct element
                 const videoEl = videoContainer.querySelector('video');
-                
+                const audioEl = videoContainer.querySelector('.mic-audio');
+
                 if (event.track.kind === 'video') {
                     videoEl.srcObject = new MediaStream([event.track]);
                 } else if (event.track.kind === 'audio') {
-                    const audioStream = new MediaStream([event.track]);
-                    
-                    // --- NEW: Audio Analysis Logic ---
-                    // Create an audio element to play the sound and an analyzer to measure it
-                    const remoteAudio = document.createElement('audio');
-                    remoteAudio.autoplay = true;
-                    remoteAudio.srcObject = audioStream;
-                    videoContainer.appendChild(remoteAudio); // Add invisible audio element
+                    // We assume the FIRST audio track is the mic.
+                    if (!audioEl.srcObject) { 
+                        const micStream = new MediaStream([event.track]);
+                        audioEl.srcObject = micStream;
 
-                    const audioContext = new AudioContext();
-                    const analyser = audioContext.createAnalyser();
-                    analyser.fftSize = 256; // Smaller size for performance
-                    const source = audioContext.createMediaStreamSource(audioStream);
-                    source.connect(analyser);
+                        // --- ATTACH THE "WHO'S TALKING" INDICATOR ONLY TO THE MIC STREAM ---
+                        const audioContext = new AudioContext();
+                        const analyser = audioContext.createAnalyser();
+                        analyser.fftSize = 256;
+                        const source = audioContext.createMediaStreamSource(micStream);
+                        source.connect(analyser);
 
-                    const dataArray = new Uint8Array(analyser.frequencyBinCount);
-                    
-                    // Stop any previous analyzer loop for this user
-                    if (audioAnalyzers[socketId]) {
-                        cancelAnimationFrame(audioAnalyzers[socketId].loopId);
-                    }
-
-                    // Start a new loop to check volume
-                    function checkVolume() {
-                        analyser.getByteFrequencyData(dataArray);
-                        let sum = 0;
-                        for (const amplitude of dataArray) {
-                            sum += amplitude * amplitude;
-                        }
-                        const average = Math.sqrt(sum / dataArray.length);
+                        const dataArray = new Uint8Array(analyser.frequencyBinCount);
                         
-                        // Threshold can be tweaked. 15-20 is usually a good starting point.
-                        if (average > 20) {
-                            videoContainer.classList.add('is-speaking');
-                        } else {
-                            videoContainer.classList.remove('is-speaking');
+                        if (audioAnalyzers[socketId]) {
+                            cancelAnimationFrame(audioAnalyzers[socketId].loopId);
                         }
-                        audioAnalyzers[socketId].loopId = requestAnimationFrame(checkVolume);
-                    }
 
-                    audioAnalyzers[socketId] = { loopId: requestAnimationFrame(checkVolume) };
+                        function checkVolume() {
+                            analyser.getByteFrequencyData(dataArray);
+                            const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+                            
+                            // A simple threshold for speaking
+                            if (average > 15) { // You can adjust this threshold
+                                videoContainer.classList.add('is-speaking');
+                            } else {
+                                videoContainer.classList.remove('is-speaking');
+                            }
+                            audioAnalyzers[socketId].loopId = requestAnimationFrame(checkVolume);
+                        }
+                        audioAnalyzers[socketId] = { loopId: requestAnimationFrame(checkVolume) };
+
+                    } else { // The SECOND audio track must be the screen share audio.
+                        if (videoEl.srcObject) {
+                            videoEl.srcObject.addTrack(event.track);
+                        }
+                    }
                 }
             };
 
+            pc.onicecandidate = (event) => { if (event.candidate) { socket.emit('webrtc-ice-candidate', socketId, event.candidate); } };
             if (isInitiator) { pc.createOffer().then(offer => pc.setLocalDescription(offer)).then(() => socket.emit('webrtc-offer', socketId, pc.localDescription)); }
         }
-
         async function toggleScreenShare(isHD, socket) {
             const screenShareBtn = document.getElementById('screen-share-btn');
             if (!isScreenSharing) {
