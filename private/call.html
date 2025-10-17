@@ -87,6 +87,40 @@
             justify-content: center;
             color: white;
         }
+        /* --- NEW MODAL STYLES --- */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: none; /* Hidden by default */
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+        }
+        .modal-overlay.visible {
+            display: flex; /* Show when active */
+        }
+        .modal-content {
+            background-color: var(--secondary-surface);
+            padding: 2rem;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+        }
+        .modal-buttons {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+        .modal-buttons button {
+             padding: 0.75rem 1.5rem; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; background-color: #4a4a4a; color: white;
+        }
+        #hd-quality-btn {
+            background-color: var(--primary-accent);
+        }
     </style>
 </head>
 <body>
@@ -103,7 +137,7 @@
         <button id="mute-btn">Mute Mic</button>
         <button id="camera-btn">Turn Camera Off</button>
         <button id="screen-share-btn">Share Screen</button>
-        <button id="hangup-btn">Hang Up</button>
+        <button id="hd-btn">HD</button> <button id="hangup-btn">Hang Up</button>
     </div>
 
     <script>
@@ -167,48 +201,72 @@
 
         async function main() {
             try {
+                // Step 1: Get camera and mic access first.
                 localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
                 localVideo.srcObject = localStream;
                 addPinButton(document.getElementById('local-video-container'));
 
+                // Step 2: Connect to the server.
                 const token = localStorage.getItem('synapse-token');
                 if (!token) { window.location.href = '/'; return; }
                 const socket = io({ auth: { token } });
 
-                // --- Signaling Listeners (Unchanged from your version) ---
+                // Step 3: Set up all signaling listeners.
                 socket.on('existing-users', (users) => { for (const [socketId, username] of Object.entries(users)) { createPeerConnection(socketId, true, username, socket); } });
                 socket.on('user-joined', (socketId, username) => { createPeerConnection(socketId, false, username, socket); });
                 socket.on('webrtc-offer', (fromSocketId, offer) => { const pc = peerConnections[fromSocketId]; if (pc) { pc.setRemoteDescription(new RTCSessionDescription(offer)).then(() => pc.createAnswer()).then(answer => pc.setLocalDescription(answer)).then(() => socket.emit('webrtc-answer', fromSocketId, pc.localDescription)); } });
                 socket.on('webrtc-answer', (fromSocketId, answer) => { const pc = peerConnections[fromSocketId]; if (pc) pc.setRemoteDescription(new RTCSessionDescription(answer)); });
                 socket.on('webrtc-ice-candidate', (fromSocketId, candidate) => { const pc = peerConnections[fromSocketId]; if (pc) pc.addIceCandidate(new RTCIceCandidate(candidate)); });
                 socket.on('user-left', (socketId) => { if (peerConnections[socketId]) { peerConnections[socketId].close(); delete peerConnections[socketId]; } const containerToRemove = document.getElementById(socketId); if (containerToRemove) { if (containerToRemove.classList.contains('pinned')) { togglePin(containerToRemove); } containerToRemove.remove(); } });
+                socket.on('user-mute-status', (socketId, isMuted) => { const container = document.getElementById(socketId); if (container) setMuteIndicator(container, isMuted); });
 
-                // --- NEW: Mute Status Listener ---
-                socket.on('user-mute-status', (socketId, isMuted) => {
-                    const container = document.getElementById(socketId);
-                    if (container) setMuteIndicator(container, isMuted);
-                });
-
-                // --- MODIFIED: Mute Button Logic ---
+                // Step 4: Set up controls.
                 const muteBtn = document.getElementById('mute-btn');
-                muteBtn.addEventListener('click', () => {
-                    const audioTrack = localStream.getAudioTracks()[0];
-                    if (audioTrack) {
-                        audioTrack.enabled = !audioTrack.enabled;
-                        const isMuted = !audioTrack.enabled;
-                        muteBtn.textContent = isMuted ? 'Unmute Mic' : 'Mute Mic';
-                        muteBtn.classList.toggle('active', isMuted);
-                        setMuteIndicator(document.getElementById('local-video-container'), isMuted);
-                        socket.emit('mute-status-changed', { isMuted });
+                muteBtn.addEventListener('click', () => { const audioTrack = localStream.getAudioTracks()[0]; if (audioTrack) { audioTrack.enabled = !audioTrack.enabled; const isMuted = !audioTrack.enabled; muteBtn.textContent = isMuted ? 'Unmute Mic' : 'Mute Mic'; muteBtn.classList.toggle('active', isMuted); setMuteIndicator(document.getElementById('local-video-container'), isMuted); socket.emit('mute-status-changed', { isMuted }); } });
+                
+                const cameraBtn = document.getElementById('camera-btn');
+                cameraBtn.addEventListener('click', () => { if (isScreenSharing) return; const videoTrack = localStream.getVideoTracks()[0]; if (videoTrack) { videoTrack.enabled = !videoTrack.enabled; cameraBtn.textContent = videoTrack.enabled ? 'Turn Camera Off' : 'Turn Camera On'; cameraBtn.classList.toggle('active', !videoTrack.enabled); } });
+                
+                document.getElementById('hangup-btn').addEventListener('click', () => { window.location.href = '/'; });
+
+                // --- NEW LOGIC FOR SCREEN SHARE MODAL ---
+                const qualityModal = document.getElementById('quality-modal');
+                const standardQualityBtn = document.getElementById('standard-quality-btn');
+                const hdQualityBtn = document.getElementById('hd-quality-btn');
+
+                // The "Share Screen" button now opens the modal.
+                document.getElementById('screen-share-btn').addEventListener('click', () => {
+                    if (isScreenSharing) {
+                        // If you're already sharing, just stop it.
+                        toggleScreenShare(false, socket);
+                    } else {
+                        // Otherwise, show the quality options.
+                        qualityModal.classList.add('visible');
                     }
                 });
                 
-                // --- Other Controls (Unchanged from your version) ---
-                const cameraBtn = document.getElementById('camera-btn');
-                cameraBtn.addEventListener('click', () => { if (isScreenSharing) return; const videoTrack = localStream.getVideoTracks()[0]; if (videoTrack) { videoTrack.enabled = !videoTrack.enabled; cameraBtn.textContent = videoTrack.enabled ? 'Turn Camera Off' : 'Turn Camera On'; cameraBtn.classList.toggle('active', !videoTrack.enabled); } });
-                document.getElementById('screen-share-btn').addEventListener('click', () => toggleScreenShare(socket));
-                document.getElementById('hangup-btn').addEventListener('click', () => { window.location.href = '/'; });
-            } catch (err) { console.error("Fatal Error:", err); }
+                // Listeners for the buttons inside the modal.
+                standardQualityBtn.addEventListener('click', () => {
+                    qualityModal.classList.remove('visible');
+                    toggleScreenShare(false, socket); // isHD = false
+                });
+
+                hdQualityBtn.addEventListener('click', () => {
+                    qualityModal.classList.remove('visible');
+                    toggleScreenShare(true, socket); // isHD = true
+                });
+
+                // Hide the modal if the user clicks the background overlay.
+                qualityModal.addEventListener('click', (e) => {
+                    if (e.target === qualityModal) {
+                        qualityModal.classList.remove('visible');
+                    }
+                });
+
+            } catch (err) { 
+                console.error("Fatal Error:", err); 
+                document.body.innerHTML = `<div style="text-align: center; padding-top: 50px;"><h1>Error</h1><p>Could not access camera/microphone. Please grant permission and refresh.</p></div>`;
+            }
         }
         // Add these icon variables at the top of your script
         const speakerIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>`;
@@ -310,49 +368,36 @@
             if (isInitiator) { pc.createOffer().then(offer => pc.setLocalDescription(offer)).then(() => socket.emit('webrtc-offer', socketId, pc.localDescription)); }
         }
 
-        async function toggleScreenShare(socket) {
+        async function toggleScreenShare(isHD, socket) {
             const screenShareBtn = document.getElementById('screen-share-btn');
             if (!isScreenSharing) {
                 try {
-                    // THIS IS THE CRITICAL CHANGE: Requesting audio
-                    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-                    isScreenSharing = true;
-                    
-                    localVideo.srcObject = screenStream;
-                    localVideo.style.transform = 'scaleX(1)'; // Un-mirror for screen share
-                    
-                    // Replace the video track for all peers
-                    await replaceTrack(screenStream.getVideoTracks()[0]);
+                    const displayMediaOptions = {
+                        video: isHD ? { cursor: "always", width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } } : true,
+                        audio: true
+                    };
 
-                    // If the user shared audio, also replace the audio track
-                    if (screenStream.getAudioTracks().length > 0) {
-                        await replaceTrack(screenStream.getAudioTracks()[0]);
-                    }
+                    screenStream = await navigator.mediaDevices.getDisplayMedia(displayMediaOptions);
+                    isScreenSharing = true;
+                    localVideo.srcObject = screenStream;
+                    localVideo.style.transform = 'scaleX(1)';
+                    
+                    await replaceTrack(screenStream.getVideoTracks()[0]);
+                    if (screenStream.getAudioTracks().length > 0) { await replaceTrack(screenStream.getAudioTracks()[0]); }
                     
                     screenShareBtn.textContent = 'Stop Sharing';
                     screenShareBtn.classList.add('active');
-                    
-                    screenStream.getVideoTracks()[0].onended = () => {
-                        if (isScreenSharing) {
-                            toggleScreenShare(socket);
-                        }
-                    };
-                } catch (err) {
-                    console.error("Screen share error", err);
-                    isScreenSharing = false;
-                }
+                    screenStream.getVideoTracks()[0].onended = () => { if (isScreenSharing) { toggleScreenShare(false, socket); } };
+                } catch (err) { console.error("Screen share error", err); isScreenSharing = false; }
             } else {
                 isScreenSharing = false;
-                
                 localVideo.srcObject = localStream;
-                localVideo.style.transform = 'scaleX(-1)'; // Re-mirror for camera
+                localVideo.style.transform = 'scaleX(-1)';
                 
-                // Send the original camera and mic tracks back to all peers
                 await replaceTrack(localStream.getVideoTracks()[0]);
                 await replaceTrack(localStream.getAudioTracks()[0]);
                 
                 screenStream.getTracks().forEach(track => track.stop());
-                
                 screenShareBtn.textContent = 'Share Screen';
                 screenShareBtn.classList.remove('active');
             }
@@ -371,5 +416,16 @@
         
         main();
     </script>
+
+    <div id="quality-modal" class="modal-overlay">
+        <div class="modal-content">
+            <h2>Choose Screen Share Quality</h2>
+            <div class="modal-buttons">
+                <button id="standard-quality-btn">Standard</button>
+                <button id="hd-quality-btn">High Quality (HD)</button>
+            </div>
+        </div>
+    </div>
+
 </body>
 </html>
