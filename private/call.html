@@ -303,6 +303,10 @@
                     // Now, create the connection for the new, legitimate user.
                     createPeerConnection(socketId, false, userData, socket);
                 });
+                socket.on('user-mute-status', (socketId, isMuted) => {
+                    const container = document.getElementById(socketId);
+                    if (container) setMuteIndicator(container, isMuted);
+                });
                 socket.on('webrtc-offer', (fromSocketId, offer) => { const pc = peerConnections[fromSocketId]; if (pc) { pc.setRemoteDescription(new RTCSessionDescription(offer)).then(() => pc.createAnswer()).then(answer => pc.setLocalDescription(answer)).then(() => socket.emit('webrtc-answer', fromSocketId, pc.localDescription)); } });
                 socket.on('webrtc-answer', (fromSocketId, answer) => { const pc = peerConnections[fromSocketId]; if (pc) pc.setRemoteDescription(new RTCSessionDescription(answer)); });
                 socket.on('webrtc-ice-candidate', (fromSocketId, candidate) => { const pc = peerConnections[fromSocketId]; if (pc) pc.addIceCandidate(new RTCIceCandidate(candidate)); });
@@ -340,6 +344,7 @@
                         muteBtn.textContent = isMuted ? 'Unmute Mic' : 'Mute Mic';
                         muteBtn.classList.toggle('active', isMuted);
                         setMuteIndicator(document.getElementById('local-video-container'), isMuted);
+                        // This line tells everyone else you are muted
                         socket.emit('mute-status-changed', { isMuted });
                     }
                 });
@@ -438,21 +443,16 @@
                 pc.addTrack(localStream.getAudioTracks()[0], localStream);
             }
 
-            // 2. Check if we are currently screen sharing.
+            // --- NEW, ROBUST LOGIC ---
+            // Determine which stream is the primary source of video.
+            const primaryStream = isScreenSharing ? screenStream : localStream;
+
+            // Add all tracks (video and potentially audio) from that primary stream.
+            primaryStream.getTracks().forEach(track => pc.addTrack(track, primaryStream));
+
+            // If we are screen sharing, we must ALSO add our microphone audio track separately.
             if (isScreenSharing) {
-                // If so, send the screen's video track.
-                if (screenStream.getVideoTracks().length > 0) {
-                    pc.addTrack(screenStream.getVideoTracks()[0], localStream); // Use localStream as the stream identifier
-                }
-                // And if the screen share has its own audio, send that too.
-                if (screenStream.getAudioTracks().length > 0) {
-                    pc.addTrack(screenStream.getAudioTracks()[0], localStream);
-                }
-            } else {
-                // Otherwise, just send the camera's video track.
-                if (localStream.getVideoTracks().length > 0) {
-                    pc.addTrack(localStream.getVideoTracks()[0], localStream);
-                }
+                localStream.getAudioTracks().forEach(track => pc.addTrack(track, localStream));
             }
 
             // --- The rest of the function is unchanged ---
