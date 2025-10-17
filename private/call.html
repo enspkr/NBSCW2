@@ -230,12 +230,40 @@
             indicator.classList.toggle('visible', isMuted);
         }
 
+        function setupLocalSpeakingIndicator(stream) {
+            const container = document.getElementById('local-video-container');
+            const audioContext = new AudioContext();
+            const analyser = audioContext.createAnalyser();
+            analyser.fftSize = 256;
+            
+            const source = audioContext.createMediaStreamSource(stream);
+            source.connect(analyser);
+
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+            function checkVolume() {
+                analyser.getByteFrequencyData(dataArray);
+                const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+                
+                // Use a threshold to detect speech
+                if (average > 15) { // You can adjust this threshold
+                    container.classList.add('is-speaking');
+                } else {
+                    container.classList.remove('is-speaking');
+                }
+                requestAnimationFrame(checkVolume);
+            }
+            requestAnimationFrame(checkVolume);
+        }
+
         async function main() {
             try {
                 // Step 1: Get camera and mic access first.
                 localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
                 localVideo.srcObject = localStream;
                 addPinButton(document.getElementById('local-video-container'));
+
+                setupLocalSpeakingIndicator(localStream);
 
                 // Step 2: Connect to the server.
                 const token = localStorage.getItem('synapse-token');
