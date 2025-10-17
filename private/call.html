@@ -61,27 +61,31 @@
         #controls button.active { background-color: var(--red-accent); }
         #hangup-btn { background-color: var(--red-accent); }
         #hangup-btn:hover { background-color: var(--red-accent-hover); }
-        /* --- NEW: Style for the client-side mute button --- */
-        .client-mute-btn {
+                /* --- NEW: Container for client-side controls --- */
+        .client-controls {
             position: absolute;
             bottom: 8px;
             right: 8px;
+            display: flex;
+            gap: 8px;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            z-index: 10;
+        }
+        .video-container:hover .client-controls {
+            opacity: 1;
+        }
+        .client-controls button {
             width: 32px;
             height: 32px;
             background-color: rgba(0,0,0,0.6);
             border: none;
             border-radius: 6px;
             cursor: pointer;
-            z-index: 10;
             display: flex;
             align-items: center;
             justify-content: center;
             color: white;
-            opacity: 0;
-            transition: opacity 0.2s ease;
-        }
-        .video-container:hover .client-mute-btn {
-            opacity: 1;
         }
     </style>
 </head>
@@ -207,62 +211,102 @@
             } catch (err) { console.error("Fatal Error:", err); }
         }
         // Add these icon variables at the top of your script
-        // Add these icon variables at the top of your script
-        const speakerIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>`;
-        const speakerOffIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"></path><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>`;
+        const speakerIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>`;
+        const speakerOffIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5z"></path><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>`;
+       // This is the new function to add the separate mute buttons
+        function addClientMuteControls(videoContainer) {
+            const controlsContainer = document.createElement('div');
+            controlsContainer.className = 'client-controls';
 
-        // This is the new function to add
-        function addClientMuteButton(videoContainer) {
-            const clientMuteBtn = document.createElement('button');
-            clientMuteBtn.className = 'client-mute-btn';
-            clientMuteBtn.innerHTML = speakerIcon;
-            clientMuteBtn.title = 'Mute for me';
-
-            clientMuteBtn.onclick = (e) => {
-                e.stopPropagation(); // Prevent pin button from firing
-                const video = videoContainer.querySelector('video');
-                if (video) {
-                    video.muted = !video.muted;
-                    clientMuteBtn.innerHTML = video.muted ? speakerOffIcon : speakerIcon;
+            // Button to mute the user's voice (mic)
+            const muteVoiceBtn = document.createElement('button');
+            muteVoiceBtn.innerHTML = speakerIcon;
+            muteVoiceBtn.title = 'Mute Voice';
+            muteVoiceBtn.onclick = (e) => {
+                e.stopPropagation();
+                const audioEl = videoContainer.querySelector('.mic-audio');
+                if (audioEl) {
+                    audioEl.muted = !audioEl.muted;
+                    muteVoiceBtn.innerHTML = audioEl.muted ? speakerOffIcon : speakerIcon;
                 }
             };
-            videoContainer.appendChild(clientMuteBtn);
+
+            // Button to mute the stream's audio (screen share audio)
+            const muteStreamBtn = document.createElement('button');
+            muteStreamBtn.innerHTML = speakerIcon;
+            muteStreamBtn.title = 'Mute Stream';
+            muteStreamBtn.onclick = (e) => {
+                e.stopPropagation();
+                const videoEl = videoContainer.querySelector('video');
+                if (videoEl) {
+                    videoEl.muted = !videoEl.muted;
+                    muteStreamBtn.innerHTML = videoEl.muted ? speakerOffIcon : speakerIcon;
+                }
+            };
+
+            controlsContainer.appendChild(muteVoiceBtn);
+            controlsContainer.appendChild(muteStreamBtn);
+            videoContainer.appendChild(controlsContainer);
         }
         function createPeerConnection(socketId, isInitiator, username, socket) {
-            const pc = new RTCPeerConnection({
-                iceServers: [
-                    { 
-                        urls: 'stun:stun.l.google.com:19302' // The STUN server (for direct connections)
-                    },
-                    {
-                        // A free, public TURN server for testing and development
-                        urls: 'turn:global.turn.twilio.com:3478?transport=udp',
-                        username: '7b73723165731b74730b206a6a2a2b72',
-                        credential: 'password'
-                    }
-                ]
-            });
-
+            const pc = new RTCPeerConnection({ iceServers: [ { urls: 'stun:stun.l.google.com:19302' }, { urls: 'turn:global.turn.twilio.com:3478?transport=udp', username: '7b73723165731b74730b206a6a2a2b72', credential: 'password' } ] });
             peerConnections[socketId] = pc;
+            
+            // Send all our local tracks
             localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-            pc.onicecandidate = (event) => { if (event.candidate) { socket.emit('webrtc-ice-candidate', socketId, event.candidate); } };
+
+            // This event fires for EACH incoming track (video, mic audio, screen audio)
             pc.ontrack = (event) => {
                 let videoContainer = document.getElementById(socketId);
+                
+                // If this is the first track for this user, create all the necessary elements
                 if (!videoContainer) {
                     videoContainer = document.createElement('div');
-                    videoContainer.id = socketId; videoContainer.className = 'video-container';
+                    videoContainer.id = socketId;
+                    videoContainer.className = 'video-container';
+                    
+                    // Create the main video element
                     const remoteVideo = document.createElement('video');
-                    remoteVideo.autoplay = true; remoteVideo.playsInline = true;
+                    remoteVideo.autoplay = true;
+                    remoteVideo.playsInline = true;
+
+                    // Create the INVISIBLE audio element just for the microphone
+                    const micAudio = document.createElement('audio');
+                    micAudio.autoplay = true;
+                    micAudio.className = 'mic-audio';
+
                     const usernameDiv = document.createElement('div');
                     usernameDiv.className = 'username-overlay';
                     usernameDiv.textContent = username;
-                    videoContainer.appendChild(remoteVideo); videoContainer.appendChild(usernameDiv);
+                    
+                    videoContainer.appendChild(remoteVideo);
+                    videoContainer.appendChild(micAudio);
+                    videoContainer.appendChild(usernameDiv);
+                    
                     addPinButton(videoContainer);
-                    addClientMuteButton(videoContainer);
+                    addClientMuteControls(videoContainer); // Add our new controls
                     videoGrid.appendChild(videoContainer);
                 }
-                videoContainer.querySelector('video').srcObject = event.streams[0];
+
+                // Now, direct the incoming track to the correct element
+                const videoEl = videoContainer.querySelector('video');
+                const audioEl = videoContainer.querySelector('.mic-audio');
+
+                if (event.track.kind === 'video') {
+                    videoEl.srcObject = new MediaStream([event.track]);
+                } else if (event.track.kind === 'audio') {
+                    // We assume the FIRST audio track is the mic, and the SECOND is the screen share.
+                    if (!audioEl.srcObject) { // First audio track = Mic
+                        audioEl.srcObject = new MediaStream([event.track]);
+                    } else { // Second audio track = Screen/Tab Audio
+                        if (videoEl.srcObject) {
+                            videoEl.srcObject.addTrack(event.track);
+                        }
+                    }
+                }
             };
+
+            pc.onicecandidate = (event) => { if (event.candidate) { socket.emit('webrtc-ice-candidate', socketId, event.candidate); } };
             if (isInitiator) { pc.createOffer().then(offer => pc.setLocalDescription(offer)).then(() => socket.emit('webrtc-offer', socketId, pc.localDescription)); }
         }
 
