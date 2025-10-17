@@ -277,6 +277,30 @@
                     }
                 });
                 socket.on('user-joined', (socketId, userData) => {
+                    // --- NEW PROTECTION LOGIC ---
+                    // Before adding the new user, check for and remove any "ghost" duplicates.
+                    // This handles rapid reconnects where the 'user-left' event hasn't processed yet.
+                    document.querySelectorAll('.video-container').forEach(container => {
+                        const usernameDiv = container.querySelector('.username-overlay');
+                        // If a container with the same username already exists (and isn't our own)
+                        if (usernameDiv && usernameDiv.textContent === userData.username && container.id !== 'local-video-container') {
+                            console.warn(`Duplicate user found for ${userData.username}. Cleaning up old connection.`);
+                            const oldSocketId = container.id;
+                            
+                            // Clean up all old resources associated with the ghost user
+                            if (peerConnections[oldSocketId]) {
+                                peerConnections[oldSocketId].close();
+                                delete peerConnections[oldSocketId];
+                            }
+                            if (audioAnalyzers[oldSocketId]) {
+                                cancelAnimationFrame(audioAnalyzers[oldSocketId].loopId);
+                                delete audioAnalyzers[oldSocketId];
+                            }
+                            container.remove();
+                        }
+                    });
+                    // --- END OF NEW LOGIC ---
+                    // Now, create the connection for the new, legitimate user.
                     createPeerConnection(socketId, false, userData, socket);
                 });
                 socket.on('webrtc-offer', (fromSocketId, offer) => { const pc = peerConnections[fromSocketId]; if (pc) { pc.setRemoteDescription(new RTCSessionDescription(offer)).then(() => pc.createAnswer()).then(answer => pc.setLocalDescription(answer)).then(() => socket.emit('webrtc-answer', fromSocketId, pc.localDescription)); } });
