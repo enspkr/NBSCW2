@@ -61,6 +61,28 @@
         #controls button.active { background-color: var(--red-accent); }
         #hangup-btn { background-color: var(--red-accent); }
         #hangup-btn:hover { background-color: var(--red-accent-hover); }
+        /* --- NEW: Style for the client-side mute button --- */
+        .client-mute-btn {
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            width: 32px;
+            height: 32px;
+            background-color: rgba(0,0,0,0.6);
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+        .video-container:hover .client-mute-btn {
+            opacity: 1;
+        }
     </style>
 </head>
 <body>
@@ -184,7 +206,28 @@
                 document.getElementById('hangup-btn').addEventListener('click', () => { window.location.href = '/'; });
             } catch (err) { console.error("Fatal Error:", err); }
         }
+        // Add these icon variables at the top of your script
+        // Add these icon variables at the top of your script
+        const speakerIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>`;
+        const speakerOffIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"></path><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>`;
 
+        // This is the new function to add
+        function addClientMuteButton(videoContainer) {
+            const clientMuteBtn = document.createElement('button');
+            clientMuteBtn.className = 'client-mute-btn';
+            clientMuteBtn.innerHTML = speakerIcon;
+            clientMuteBtn.title = 'Mute for me';
+
+            clientMuteBtn.onclick = (e) => {
+                e.stopPropagation(); // Prevent pin button from firing
+                const video = videoContainer.querySelector('video');
+                if (video) {
+                    video.muted = !video.muted;
+                    clientMuteBtn.innerHTML = video.muted ? speakerOffIcon : speakerIcon;
+                }
+            };
+            videoContainer.appendChild(clientMuteBtn);
+        }
         function createPeerConnection(socketId, isInitiator, username, socket) {
             const pc = new RTCPeerConnection({
                 iceServers: [
@@ -215,6 +258,7 @@
                     usernameDiv.textContent = username;
                     videoContainer.appendChild(remoteVideo); videoContainer.appendChild(usernameDiv);
                     addPinButton(videoContainer);
+                    addClientMuteButton(videoContainer);
                     videoGrid.appendChild(videoContainer);
                 }
                 videoContainer.querySelector('video').srcObject = event.streams[0];
