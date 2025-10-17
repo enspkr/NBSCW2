@@ -440,19 +440,16 @@
             });
             peerConnections[socketId] = pc;
 
-            // --- CORRECTED LOGIC: Add all tracks from the necessary streams ---
-
-            // 1. Add all tracks from the local microphone/camera stream.
-            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-
-            // 2. If we are currently screen sharing, ALSO add all tracks from that stream.
-            if (isScreenSharing && screenStream) {
-                screenStream.getTracks().forEach(track => pc.addTrack(track, screenStream));
+            // --- Sending logic is correct and remains unchanged ---
+            const streamToSend = isScreenSharing ? screenStream : localStream;
+            streamToSend.getTracks().forEach(track => pc.addTrack(track, streamToSend));
+            if (isScreenSharing) {
+                localStream.getAudioTracks().forEach(track => pc.addTrack(track, localStream));
             }
 
-            // --- The rest of the function remains the same ---
             pc.onicecandidate = (event) => { if (event.candidate) { socket.emit('webrtc-ice-candidate', socketId, event.candidate); } };
 
+            // --- THIS IS THE CORRECTED RECEIVING LOGIC ---
             pc.ontrack = (event) => {
                 let videoContainer = document.getElementById(socketId);
                 if (!videoContainer) {
@@ -480,20 +477,20 @@
                 const videoEl = videoContainer.querySelector('video');
                 const audioEl = videoContainer.querySelector('.mic-audio');
                 
-                // This logic correctly separates the streams on the receiving end
                 if (event.track.kind === 'video') {
                     // Always put video tracks in the video element.
-                    // If a screen share starts, its video track will replace the camera track here.
                     videoEl.srcObject = new MediaStream([event.track]);
                 } else if (event.track.kind === 'audio') {
-                    // Use the stream's ID to differentiate mic from screen share audio
-                    if (event.streams[0].id === localStream.id) {
-                         audioEl.srcObject = new MediaStream([event.track]);
-                         setupSpeakingIndicator(videoContainer, new MediaStream([event.track]), socketId);
-                    } else {
-                         if (videoEl.srcObject) {
-                             videoEl.srcObject.addTrack(event.track);
-                         }
+                    // If the invisible audio element is empty, this must be the microphone.
+                    if (!audioEl.srcObject) {
+                        const micStream = new MediaStream([event.track]);
+                        audioEl.srcObject = micStream;
+                        setupSpeakingIndicator(videoContainer, micStream, socketId);
+                    } else { // Otherwise, this must be the screen share audio.
+                        // Add this audio track to the video element's stream.
+                        if (videoEl.srcObject) {
+                            videoEl.srcObject.addTrack(event.track);
+                        }
                     }
                 }
             };
