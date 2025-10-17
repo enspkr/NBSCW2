@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Synapse Call</title>
+    <title>Private Call 😉</title>
     <script src="/socket.io/socket.io.js"></script>
     <head>
     <head>
@@ -121,6 +121,11 @@
         #hd-quality-btn {
             background-color: var(--primary-accent);
         }
+        /* --- NEW: Style for the speaking indicator --- */
+        .video-container.is-speaking {
+            border: 3px solid #66ff66; /* A bright green glow */
+            box-shadow: 0 0 15px #66ff66;
+        }
     </style>
 </head>
 <body>
@@ -144,6 +149,7 @@
         const videoGrid = document.getElementById('video-grid');
         const localVideo = document.getElementById('local-video');
         const peerConnections = {};
+        const audioAnalyzers = {}; // NEW: To store audio analysis data
         let localStream, screenStream;
         let isScreenSharing = false;
 
@@ -217,8 +223,17 @@
                 socket.on('webrtc-offer', (fromSocketId, offer) => { const pc = peerConnections[fromSocketId]; if (pc) { pc.setRemoteDescription(new RTCSessionDescription(offer)).then(() => pc.createAnswer()).then(answer => pc.setLocalDescription(answer)).then(() => socket.emit('webrtc-answer', fromSocketId, pc.localDescription)); } });
                 socket.on('webrtc-answer', (fromSocketId, answer) => { const pc = peerConnections[fromSocketId]; if (pc) pc.setRemoteDescription(new RTCSessionDescription(answer)); });
                 socket.on('webrtc-ice-candidate', (fromSocketId, candidate) => { const pc = peerConnections[fromSocketId]; if (pc) pc.addIceCandidate(new RTCIceCandidate(candidate)); });
-                socket.on('user-left', (socketId) => { if (peerConnections[socketId]) { peerConnections[socketId].close(); delete peerConnections[socketId]; } const containerToRemove = document.getElementById(socketId); if (containerToRemove) { if (containerToRemove.classList.contains('pinned')) { togglePin(containerToRemove); } containerToRemove.remove(); } });
-                socket.on('user-mute-status', (socketId, isMuted) => { const container = document.getElementById(socketId); if (container) setMuteIndicator(container, isMuted); });
+                socket.on('user-left', (socketId) => { 
+                    if (peerConnections[socketId]) { /* ... */ } 
+                    const containerToRemove = document.getElementById(socketId); 
+                    if (containerToRemove) { /* ... */ }
+
+                    // --- ADD THIS CLEANUP LOGIC ---
+                    if (audioAnalyzers[socketId]) {
+                        cancelAnimationFrame(audioAnalyzers[socketId].loopId);
+                        delete audioAnalyzers[socketId];
+                    }
+                });
 
                 // Step 4: Set up controls.
                 const muteBtn = document.getElementById('mute-btn');
@@ -310,61 +325,79 @@
             const pc = new RTCPeerConnection({ iceServers: [ { urls: 'stun:stun.l.google.com:19302' }, { urls: 'turn:global.turn.twilio.com:3478?transport=udp', username: '7b73723165731b74730b206a6a2a2b72', credential: 'password' } ] });
             peerConnections[socketId] = pc;
             
-            // Send all our local tracks
             localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 
-            // This event fires for EACH incoming track (video, mic audio, screen audio)
+            pc.onicecandidate = (event) => { if (event.candidate) { socket.emit('webrtc-ice-candidate', socketId, event.candidate); } };
+            
             pc.ontrack = (event) => {
                 let videoContainer = document.getElementById(socketId);
-                
-                // If this is the first track for this user, create all the necessary elements
+                // Create the video container if it's the first track from this user
                 if (!videoContainer) {
                     videoContainer = document.createElement('div');
                     videoContainer.id = socketId;
                     videoContainer.className = 'video-container';
-                    
-                    // Create the main video element
                     const remoteVideo = document.createElement('video');
                     remoteVideo.autoplay = true;
                     remoteVideo.playsInline = true;
-
-                    // Create the INVISIBLE audio element just for the microphone
-                    const micAudio = document.createElement('audio');
-                    micAudio.autoplay = true;
-                    micAudio.className = 'mic-audio';
-
                     const usernameDiv = document.createElement('div');
                     usernameDiv.className = 'username-overlay';
                     usernameDiv.textContent = username;
-                    
                     videoContainer.appendChild(remoteVideo);
-                    videoContainer.appendChild(micAudio);
                     videoContainer.appendChild(usernameDiv);
-                    
                     addPinButton(videoContainer);
-                    addClientMuteControls(videoContainer); // Add our new controls
+                    addClientMuteControls(videoContainer);
                     videoGrid.appendChild(videoContainer);
                 }
 
-                // Now, direct the incoming track to the correct element
                 const videoEl = videoContainer.querySelector('video');
-                const audioEl = videoContainer.querySelector('.mic-audio');
-
+                
                 if (event.track.kind === 'video') {
                     videoEl.srcObject = new MediaStream([event.track]);
                 } else if (event.track.kind === 'audio') {
-                    // We assume the FIRST audio track is the mic, and the SECOND is the screen share.
-                    if (!audioEl.srcObject) { // First audio track = Mic
-                        audioEl.srcObject = new MediaStream([event.track]);
-                    } else { // Second audio track = Screen/Tab Audio
-                        if (videoEl.srcObject) {
-                            videoEl.srcObject.addTrack(event.track);
-                        }
+                    const audioStream = new MediaStream([event.track]);
+                    
+                    // --- NEW: Audio Analysis Logic ---
+                    // Create an audio element to play the sound and an analyzer to measure it
+                    const remoteAudio = document.createElement('audio');
+                    remoteAudio.autoplay = true;
+                    remoteAudio.srcObject = audioStream;
+                    videoContainer.appendChild(remoteAudio); // Add invisible audio element
+
+                    const audioContext = new AudioContext();
+                    const analyser = audioContext.createAnalyser();
+                    analyser.fftSize = 256; // Smaller size for performance
+                    const source = audioContext.createMediaStreamSource(audioStream);
+                    source.connect(analyser);
+
+                    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+                    
+                    // Stop any previous analyzer loop for this user
+                    if (audioAnalyzers[socketId]) {
+                        cancelAnimationFrame(audioAnalyzers[socketId].loopId);
                     }
+
+                    // Start a new loop to check volume
+                    function checkVolume() {
+                        analyser.getByteFrequencyData(dataArray);
+                        let sum = 0;
+                        for (const amplitude of dataArray) {
+                            sum += amplitude * amplitude;
+                        }
+                        const average = Math.sqrt(sum / dataArray.length);
+                        
+                        // Threshold can be tweaked. 15-20 is usually a good starting point.
+                        if (average > 20) {
+                            videoContainer.classList.add('is-speaking');
+                        } else {
+                            videoContainer.classList.remove('is-speaking');
+                        }
+                        audioAnalyzers[socketId].loopId = requestAnimationFrame(checkVolume);
+                    }
+
+                    audioAnalyzers[socketId] = { loopId: requestAnimationFrame(checkVolume) };
                 }
             };
 
-            pc.onicecandidate = (event) => { if (event.candidate) { socket.emit('webrtc-ice-candidate', socketId, event.candidate); } };
             if (isInitiator) { pc.createOffer().then(offer => pc.setLocalDescription(offer)).then(() => socket.emit('webrtc-offer', socketId, pc.localDescription)); }
         }
 
