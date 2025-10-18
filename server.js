@@ -29,6 +29,43 @@ const protectRoute = (req, res, next) => {
     });
 };
 
+// At the top with your other requires
+const sqlite3 = require('sqlite3').verbose();
+
+// ...
+
+// Near your userDb connection
+const chatDb = new sqlite3.Database('./chat.db', (err) => {
+    if (err) console.error(err.message);
+    else console.log('✅ Connected to the chat database.');
+    chatDb.run(`CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY, username TEXT, message TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+});
+
+// ...
+
+// Inside your existing io.on('connection', ...) block
+io.on('connection', (socket) => {
+    // ... (all your existing video call listeners like 'existing-users', 'webrtc-offer', etc. stay here)
+
+    // --- ADD THIS CHAT LOGIC ---
+
+    // Send recent chat history to the newly connected user
+    chatDb.all("SELECT username, message FROM messages ORDER BY timestamp DESC LIMIT 50", [], (err, rows) => {
+        if (err) return console.error(err.message);
+        socket.emit('chat history', rows.reverse());
+    });
+
+    // Listen for new chat messages from a client
+    socket.on('chat message', (message) => {
+        const username = socket.user.username;
+        chatDb.run("INSERT INTO messages (username, message) VALUES (?, ?)", [username, message], (err) => {
+            if (err) return console.error(err.message);
+            // Broadcast the message to everyone in the call
+            io.emit('chat message', { username, message });
+        });
+    });
+});
+
 app.post('/login', (req, res) => {
     const { username, password } = req.body;
     const sql = "SELECT * FROM users WHERE username = ?";

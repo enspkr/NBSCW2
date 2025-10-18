@@ -140,46 +140,6 @@
         .video-container.is-speaking {
             border: 3px solid #007acc; /* A bright blue glow */
         }
-        /* --- NEW CHAT STYLES --- */
-        #chat-container {
-            position: fixed;
-            right: 0;
-            top: 0;
-            width: 300px;
-            height: 100%;
-            background-color: var(--primary-surface);
-            display: flex;
-            flex-direction: column;
-            border-left: 1px solid #444;
-            z-index: 50;
-        }
-        #messages {
-            list-style-type: none;
-            margin: 0;
-            padding: 1rem;
-            flex-grow: 1;
-            overflow-y: auto;
-        }
-        #messages li {
-            padding: 0.5rem 0;
-            border-bottom: 1px solid #333;
-        }
-        #chat-form {
-            padding: 1rem;
-            display: flex;
-        }
-        #chat-input {
-            border: 1px solid #444;
-            padding: 0.75rem;
-            flex-grow: 1;
-            border-radius: 8px;
-            margin-right: 1rem;
-            background-color: var(--secondary-surface);
-            color: white;
-        }
-        #chat-form button {
-            background: var(--primary-accent); border: none; padding: 0.75rem 1rem; border-radius: 8px; color: white; cursor: pointer;
-        }
     </style>
 </head>
 <body>
@@ -191,13 +151,6 @@
             </div>
         </div>
     </main>
-
-    <div id="chat-container">
-        <ul id="messages"></ul>
-        <form id="chat-form" action="">
-            <input id="chat-input" autocomplete="off" /><button>Send</button>
-        </form>
-    </div>
 
     <div id="controls">
         <button id="mute-btn">Mute Mic</button>
@@ -350,10 +303,6 @@
                     // Now, create the connection for the new, legitimate user.
                     createPeerConnection(socketId, false, userData, socket);
                 });
-                socket.on('user-mute-status', (socketId, isMuted) => {
-                    const container = document.getElementById(socketId);
-                    if (container) setMuteIndicator(container, isMuted);
-                });
                 socket.on('webrtc-offer', (fromSocketId, offer) => { const pc = peerConnections[fromSocketId]; if (pc) { pc.setRemoteDescription(new RTCSessionDescription(offer)).then(() => pc.createAnswer()).then(answer => pc.setLocalDescription(answer)).then(() => socket.emit('webrtc-answer', fromSocketId, pc.localDescription)); } });
                 socket.on('webrtc-answer', (fromSocketId, answer) => { const pc = peerConnections[fromSocketId]; if (pc) pc.setRemoteDescription(new RTCSessionDescription(answer)); });
                 socket.on('webrtc-ice-candidate', (fromSocketId, candidate) => { const pc = peerConnections[fromSocketId]; if (pc) pc.addIceCandidate(new RTCIceCandidate(candidate)); });
@@ -391,7 +340,6 @@
                         muteBtn.textContent = isMuted ? 'Unmute Mic' : 'Mute Mic';
                         muteBtn.classList.toggle('active', isMuted);
                         setMuteIndicator(document.getElementById('local-video-container'), isMuted);
-                        // This line tells everyone else you are muted
                         socket.emit('mute-status-changed', { isMuted });
                     }
                 });
@@ -433,50 +381,6 @@
                     if (e.target === qualityModal) {
                         qualityModal.classList.remove('visible');
                     }
-                });
-                // Inside your main() function
-
-                const messages = document.getElementById('messages');
-                const chatForm = document.getElementById('chat-form');
-                const chatInput = document.getElementById('chat-input');
-
-                chatForm.addEventListener('submit', function(e) {
-                    e.preventDefault();
-                    if (chatInput.value) {
-                        socket.emit('chat message', chatInput.value);
-                        chatInput.value = '';
-                    }
-                });
-
-                // In private/call.html
-
-                function addChatMessage({ username, message }) {
-                    const item = document.createElement('li');
-                    
-                    // Regular expression to find URLs in the message text
-                    const urlRegex = /(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])|(\bwww\.[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
-
-                    // Replace found URLs with clickable <a> tags
-                    const processedMessage = message.replace(urlRegex, (url) => {
-                        let href = url;
-                        // Ensure links starting with 'www' work correctly
-                        if (!href.startsWith('http')) {
-                            href = `http://${href}`;
-                        }
-                        return `<a href="${href}" target="_blank" rel="noopener noreferrer">${url}</a>`;
-                    });
-                    
-                    item.innerHTML = `<strong>${username}:</strong> ${processedMessage}`;
-                    messages.appendChild(item);
-                    messages.scrollTop = messages.scrollHeight;
-                }
-
-                socket.on('chat history', function(history) {
-                    history.forEach(msg => addChatMessage(msg));
-                });
-
-                socket.on('chat message', function(msg) {
-                    addChatMessage(msg);
                 });
 
             } catch (err) { 
@@ -523,62 +427,86 @@
             videoContainer.appendChild(controlsContainer);
         }
         function createPeerConnection(socketId, isInitiator, userData, socket) {
-            const pc = new RTCPeerConnection({
-                iceServers: [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'turn:global.turn.twilio.com:3478?transport=udp', username: '7b73723165731b74730b206a6a2a2b72', credential: 'password' }
-                ]
-            });
+            const pc = new RTCPeerConnection({ iceServers: [ { urls: 'stun:stun.l.google.com:19302' }, { urls: 'turn:global.turn.twilio.com:3478?transport=udp', username: '7b73723165731b74730b206a6a2a2b72', credential: 'password' } ] });
             peerConnections[socketId] = pc;
+            
+            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 
-            // --- Sending logic is correct and remains unchanged ---
-            const streamToSend = isScreenSharing ? screenStream : localStream;
-            streamToSend.getTracks().forEach(track => pc.addTrack(track, streamToSend));
-            if (isScreenSharing) {
-                localStream.getAudioTracks().forEach(track => pc.addTrack(track, localStream));
-            }
-
-            pc.onicecandidate = (event) => { if (event.candidate) { socket.emit('webrtc-ice-candidate', socketId, event.candidate); } };
-
-            // --- THIS IS THE CORRECTED RECEIVING LOGIC ---
+            // This event fires for EACH incoming track
             pc.ontrack = (event) => {
                 let videoContainer = document.getElementById(socketId);
+                
+                // If this is the first track, create all the necessary elements
                 if (!videoContainer) {
                     videoContainer = document.createElement('div');
                     videoContainer.id = socketId;
                     videoContainer.className = 'video-container';
+                    
                     const remoteVideo = document.createElement('video');
                     remoteVideo.autoplay = true;
                     remoteVideo.playsInline = true;
+
+                    // Create the INVISIBLE audio element just for the microphone
                     const micAudio = document.createElement('audio');
                     micAudio.autoplay = true;
                     micAudio.className = 'mic-audio';
+
                     const usernameDiv = document.createElement('div');
                     usernameDiv.className = 'username-overlay';
-                    usernameDiv.textContent = userData.username;
+                    usernameDiv.textContent = userData.username; // Use userData object
+                    
                     videoContainer.appendChild(remoteVideo);
                     videoContainer.appendChild(micAudio);
                     videoContainer.appendChild(usernameDiv);
+                    
                     addPinButton(videoContainer);
                     addClientMuteControls(videoContainer);
                     videoGrid.appendChild(videoContainer);
+
+                    // Set initial mute status for the user
                     setMuteIndicator(videoContainer, userData.isMuted);
                 }
 
+                // Direct the track to the correct element
                 const videoEl = videoContainer.querySelector('video');
                 const audioEl = videoContainer.querySelector('.mic-audio');
-                
+
                 if (event.track.kind === 'video') {
-                    // Always put video tracks in the video element.
                     videoEl.srcObject = new MediaStream([event.track]);
                 } else if (event.track.kind === 'audio') {
-                    // If the invisible audio element is empty, this must be the microphone.
-                    if (!audioEl.srcObject) {
+                    // We assume the FIRST audio track is the mic.
+                    if (!audioEl.srcObject) { 
                         const micStream = new MediaStream([event.track]);
                         audioEl.srcObject = micStream;
-                        setupSpeakingIndicator(videoContainer, micStream, socketId);
-                    } else { // Otherwise, this must be the screen share audio.
-                        // Add this audio track to the video element's stream.
+
+                        // --- ATTACH THE "WHO'S TALKING" INDICATOR ONLY TO THE MIC STREAM ---
+                        const audioContext = new AudioContext();
+                        const analyser = audioContext.createAnalyser();
+                        analyser.fftSize = 256;
+                        const source = audioContext.createMediaStreamSource(micStream);
+                        source.connect(analyser);
+
+                        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+                        
+                        if (audioAnalyzers[socketId]) {
+                            cancelAnimationFrame(audioAnalyzers[socketId].loopId);
+                        }
+
+                        function checkVolume() {
+                            analyser.getByteFrequencyData(dataArray);
+                            const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+                            
+                            // A simple threshold for speaking
+                            if (average > 15) { // You can adjust this threshold
+                                videoContainer.classList.add('is-speaking');
+                            } else {
+                                videoContainer.classList.remove('is-speaking');
+                            }
+                            audioAnalyzers[socketId].loopId = requestAnimationFrame(checkVolume);
+                        }
+                        audioAnalyzers[socketId] = { loopId: requestAnimationFrame(checkVolume) };
+
+                    } else { // The SECOND audio track must be the screen share audio.
                         if (videoEl.srcObject) {
                             videoEl.srcObject.addTrack(event.track);
                         }
@@ -586,6 +514,7 @@
                 }
             };
 
+            pc.onicecandidate = (event) => { if (event.candidate) { socket.emit('webrtc-ice-candidate', socketId, event.candidate); } };
             if (isInitiator) { pc.createOffer().then(offer => pc.setLocalDescription(offer)).then(() => socket.emit('webrtc-offer', socketId, pc.localDescription)); }
         }
         async function toggleScreenShare(isHD, socket) {
