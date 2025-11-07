@@ -13,10 +13,10 @@
         }
 
         #game-board-container {
-            position: relative; /* Patlama ve "Oyun Bitti" ekranı için */
+            position: relative;
             width: 100%;
-            max-width: 500px; /* Maksimum genişlik */
-            margin: auto; /* Ortala */
+            max-width: 500px;
+            margin: auto;
         }
 
         #game-board {
@@ -24,17 +24,17 @@
             grid-template-columns: repeat(5, 1fr);
             grid-template-rows: repeat(5, 1fr);
             border: 2px solid var(--cell-border);
-            border-radius: 8px; /* Yumuşak kenarlar */
+            border-radius: 8px;
             width: 100%;
             aspect-ratio: 1 / 1;
             background-color: var(--board-bg);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.4); /* Gölgelendirme */
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
         }
 
         .cell {
             border: 1px solid var(--cell-border);
             box-sizing: border-box;
-            font-size: 2.2rem; /* Zar ikonları için büyük boyut */
+            font-size: 2.2rem;
             font-weight: bold;
             display: flex;
             align-items: center;
@@ -42,15 +42,14 @@
             cursor: pointer;
             transition: all 0.2s ease;
             user-select: none;
-            color: #fff; /* İkon rengi (her zaman beyaz) */
-            position: relative; /* Patlama efekti için */
+            color: #fff;
+            position: relative;
         }
 
         .cell:hover {
             background-color: var(--cell-hover);
         }
 
-        /* Oyuncu Renkleri */
         .cell.p1 { background-color: var(--p1-color); }
         .cell.p2 { background-color: var(--p2-color); }
 
@@ -70,6 +69,39 @@
             100% { transform: scale(1.5); opacity: 0; }
         }
 
+        /* YENİ: Başlangıç Çarkı Stilleri */
+        #wheel-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: rgba(0, 0, 0, 0.9);
+            color: #fff;
+            display: none; /* JS ile 'flex' yapılacak */
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 20;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 1.5rem;
+        }
+        #wheel-spinner {
+            font-size: 100px;
+            margin-bottom: 20px;
+            animation: spin 1.5s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        #wheel-overlay.finished #wheel-spinner {
+            animation: spin 0.5s linear 3, spin-stop 0.5s ease-out 1.5s forwards;
+            color: #28a745; /* Yeşil */
+        }
+        @keyframes spin-stop {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(720deg); }
+        }
+
         /* Oyun Bitti Ekranı */
         #game-over-overlay {
             position: absolute;
@@ -85,14 +117,14 @@
             text-align: center;
         }
 
-        /* Mesaj Logu Stilleri (Koyu) */
+        /* Mesaj Logu Stilleri */
         #message-log {
             height: 250px;
             overflow-y: scroll;
-            background: #343a40; /* bg-secondary */
+            background: #343a40;
             border-radius: 0.25rem;
             border: 1px solid #495057;
-            color: #f8f9fa; /* text-light */
+            color: #f8f9fa;
         }
         #message-log p { margin: 0; padding: 2px 8px; }
     </style>
@@ -101,15 +133,22 @@
 
 {% block content %}
     <h1 class="mb-4">Oyun Odası</h1>
-        
+
     <div class="row">
         <div class="col-lg-7 col-md-8 mb-4">
 
             <div id="game-board-container">
+
                 <div id="game-over-overlay">
                     <h2 class="mb-3">Oyun Bitti!</h2>
                     <h4 class="mb-4">Kazanan: <span id="winner-name">...</span></h4>
                     <a href="{% url 'game_lobby' %}" class="btn btn-primary btn-lg">Yeni Oyun</a>
+                </div>
+
+                <div id="wheel-overlay">
+                    <div id="wheel-spinner"><i class="fas fa-compact-disc"></i></div>
+                    <h4>Başlangıç sırası belirleniyor...</h4>
+                    <h3 id="wheel-winner-name" class="mt-3" style="display: none;"></h3>
                 </div>
 
                 <div id="game-board">
@@ -125,7 +164,7 @@
                 </div>
                 <div class="card-body">
                     <h5 id="turn-indicator" class="card-title mb-3">
-                        Sıra: {{ game.current_turn.username|default:"Oyun başlıyor..." }}
+                        Sıra: {{ game.current_turn.username|default:"Rakip bekleniyor..." }}
                     </h5>
                     <p class="mb-1">
                         <strong><i class="fas fa-circle text-danger"></i> Oyuncu 1:</strong> {{ game.player1.username }}
@@ -142,11 +181,11 @@
                     {% endif %}
 
                     <hr class="border-secondary">
-                    
+
                     <label for="message-log" class="form-label">Oyun Kayıtları:</label>
                     <div id="message-log" class="p-2">
                         </div>
-                    
+
                     <a href="{% url 'game_lobby' %}" class="btn btn-secondary mt-3 w-100">Lobiden Ayrıl</a>
                 </div>
             </div>
@@ -157,31 +196,37 @@
     {{ username_json|json_script:"current-username" }}
     {{ is_spectator|json_script:"is-spectator" }}
 {% endblock %}
-
-
 {% block extra_js %}
     <script>
         // DOM elementleri ve veriler
         const gameId = JSON.parse(document.getElementById('game-id').textContent);
         const myUsername = JSON.parse(document.getElementById('current-username').textContent);
         const isSpectator = JSON.parse(document.getElementById('is-spectator').textContent);
-        
+
         const boardElement = document.getElementById('game-board');
         const turnIndicator = document.getElementById('turn-indicator');
         const player2Name = document.getElementById('player2-name');
         const messageLog = document.getElementById('message-log');
+
+        // Overlay (Ekran) elementleri
         const gameOverOverlay = document.getElementById('game-over-overlay');
         const winnerNameEl = document.getElementById('winner-name');
+        const wheelOverlay = document.getElementById('wheel-overlay');
+        const wheelWinnerText = document.getElementById('wheel-winner-name');
 
         let player1Username = '{{ game.player1.username }}';
         let player2Username = '{{ game.player2.username|default_if_none:"" }}';
 
-        // 1, 2, 3 sayılarını Font Awesome zar ikonlarına çevirir
         const diceIcons = {
             1: 'fa-dice-one',
             2: 'fa-dice-two',
             3: 'fa-dice-three'
         };
+
+        // Gecikme (uyku) fonksiyonu
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
 
         // WebSocket Bağlantısı
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -189,13 +234,7 @@
             wsProtocol + '//' + window.location.host + '/ws/game/' + gameId + '/'
         );
 
-        // Sunucudan Mesaj Alma
-        function sleep(ms) {
-            return new Promise(resolve => setTimeout(resolve, ms));
-        }
-
-        // Sunucudan Mesaj Alma (GÜNCELLENDİ)
-        // 'async' yapıldı
+        // Sunucudan Mesaj Alma (GÜNCELLENMİŞ - Çark mantığı eklendi)
         gameSocket.onmessage = async function(e) {
             const data = JSON.parse(e.data);
             console.log("Sunucudan alındı:", data);
@@ -206,12 +245,35 @@
             }
 
             if (data.type === 'game_state') {
+
+                // --- 1. Oyuncu Adlarını Güncelle (P2 katılınca haberdar ol) ---
                 player1Username = data.p1;
                 player2Username = data.p2 || "";
                 player2Name.textContent = data.p2 || "Rakip bekleniyor...";
 
+                // --- 2. YENİ: Başlangıç Çarkı Animasyonu ---
+                if (data.special_event === 'game_start_roll') {
+                    // 1. Çarkı göster
+                    wheelWinnerText.style.display = 'none';
+                    wheelOverlay.classList.remove('finished');
+                    wheelOverlay.style.display = 'flex';
+
+                    // 2. Animasyonun bitmesini bekle (2.5 saniye)
+                    await sleep(2500);
+
+                    // 3. Sonucu göster
+                    wheelWinnerText.innerHTML = `<i class="fas fa-check-circle"></i> ${data.turn} başlıyor!`;
+                    wheelWinnerText.style.display = 'block';
+                    wheelOverlay.classList.add('finished');
+
+                    // 4. 2 saniye daha bekle ve çarkı gizle
+                    await sleep(2000);
+                    wheelOverlay.style.display = 'none';
+                    logMessage(data.message, 'success');
+                }
+
+                // --- 3. Durum ve Sıra Göstergesi ---
                 if (data.status === 'finished') {
-                    // ... (Oyun bitti mantığı - aynı) ...
                     turnIndicator.textContent = "Oyun Bitti!";
                     logMessage("Kazanan: " + data.winner, 'success');
                     winnerNameEl.textContent = data.winner;
@@ -223,12 +285,12 @@
                     turnIndicator.textContent = "Sıra: " + data.turn;
                 }
 
-                // *** YENİ: Sıralı Animasyon (await ile) ***
+                // --- 4. Sıralı Patlama Animasyonu ---
                 if (data.exploded_cells && data.exploded_cells.length > 0) {
                     // Tahtayı *kilitle* (animasyon bitene kadar tıklanmasın)
                     boardElement.style.pointerEvents = 'none';
 
-                    // Patlamaları SIRAYLA tetikle ve bitmesini bekle
+                    // Patlamaları SIRAYLA tetikle
                     await triggerSequentialExplosions(data.exploded_cells);
 
                     // Animasyon bitti, tahtayı son haliyle çiz
@@ -242,7 +304,7 @@
                     renderBoard(data.state);
                 }
 
-                if (data.message) {
+                if (data.message && data.special_event !== 'game_start_roll') {
                     logMessage(data.message, 'info');
                 }
             }
@@ -257,35 +319,33 @@
         gameSocket.onopen = function(e) {
             logMessage('Oyun masasına başarıyla bağlandınız.', 'success');
         };
-        async function triggerSequentialExplosions(explodedCells) {
-            // Her patlama arasındaki milisaniye (ms)
-            const EXPLOSION_DELAY = 200; // 200ms
 
-            // 'explodedCells' listesi Puthon'dan zaten sıralı geliyor (BFS)
+        // Sıralı Patlama Fonksiyonu
+        async function triggerSequentialExplosions(explodedCells) {
+            const EXPLOSION_DELAY = 200; // Her patlama arası bekleme (ms)
+
             for (const coords of explodedCells) {
                 const [r, c] = coords;
                 const cellEl = boardElement.querySelector(`.cell[data-row="${r}"][data-col="${c}"]`);
 
                 if (cellEl) {
-                    // 1. Patlama efektini ekle
+                    // Patlama efektini ekle
                     cellEl.classList.add('explode');
-
-                    // 2. Bir sonraki patlamaya geçmeden önce bekle
+                    // Bir sonraki patlamaya geçmeden önce bekle
                     await sleep(EXPLOSION_DELAY);
 
-                    // 3. (Opsiyonel) Efekti kaldır ki son 'renderBoard' temiz bulsun
-                    //    Gerçi 'renderBoard' tüm HTML'i yeniden yazıyor, buna gerek yok.
-                    //    CSS animasyonu (0.4s) bitmeden önce sıradaki başlayacak,
-                    //    bu da güzel bir zincirleme efekti verir.
+                    // Not: CSS animasyonu 400ms sürerken biz 200ms'de
+                    // bir sonrakini tetikliyoruz. Bu, zincirleme
+                    // reaksiyonun "üst üste binerek" akmasını sağlar.
                 }
             }
 
-            // Tüm 'for' döngüsü bittikten sonra, son animasyonun da
-            // bitmesi için CSS'de tanımlı '0.4s' (400ms) kadar daha bekle.
+            // Tüm patlamalar tetiklendikten sonra, sonuncusunun da
+            // bitmesi için 400ms (CSS animasyon süresi) kadar bekle.
             await sleep(400);
         }
 
-        // *** GÜNCELLENMİŞ: Tahta Çizme (Zar İkonlarıyla) ***
+        // Tahta Çizme Fonksiyonu (Zar ikonlarıyla)
         function renderBoard(boardState) {
             boardElement.innerHTML = '';
             for (let r = 0; r < 5; r++) {
@@ -297,20 +357,15 @@
 
                     const cellData = boardState[r][c];
 
-                    // Hücre doluysa (None değilse) ve sayısı 0'dan büyükse
                     if (cellData && cellData.count > 0) {
-
-                        // Zar ikonu varsa (1, 2, 3 için) ikonu bas
                         if (diceIcons[cellData.count]) {
                             const icon = document.createElement('i');
                             icon.className = `fas ${diceIcons[cellData.count]}`;
                             cellElement.appendChild(icon);
                         } else {
-                            // Fallback (4+ beklenmez ama olursa sayıyı bas)
-                            cellElement.textContent = cellData.count;
+                            cellElement.textContent = cellData.count; // 4+ için
                         }
 
-                        // Oyuncu renklerini ata
                         if (cellData.owner === player1Username) {
                             cellElement.classList.add('p1');
                         } else if (cellData.owner === player2Username) {
@@ -318,7 +373,6 @@
                         }
 
                     } else {
-                        // Hücre boşsa (None veya count: 0) içeriğini temizle
                         cellElement.innerHTML = '';
                     }
                     boardElement.appendChild(cellElement);
@@ -326,35 +380,16 @@
             }
         }
 
-        // *** YENİ: Patlama Animasyon Fonksiyonu ***
-        function triggerExplosions(explodedCells, finalBoardState) {
-            // 1. Tüm patlayan hücrelere animasyon sınıfını ekle
-            explodedCells.forEach(coords => {
-                const [r, c] = coords;
-                const cellEl = boardElement.querySelector(`.cell[data-row="${r}"][data-col="${c}"]`);
-                if (cellEl) {
-                    cellEl.classList.add('explode');
-                }
-            });
-
-            // 2. Animasyonun bitmesini bekle (CSS'de 0.4s = 400ms)
-            //    ve tahtanın son halini çiz.
-            setTimeout(() => {
-                renderBoard(finalBoardState);
-            }, 400);
-        }
-
-        // Hamle Gönderme (Değişiklik yok)
+        // Hamle Gönderme (Tıklama)
         boardElement.addEventListener('click', function(e) {
-            // ... (Kodunuzun bu kısmı değişmedi) ...
             const cell = e.target.closest('.cell');
             if (!cell) return;
             if (isSpectator) {
                 logMessage("İzleyiciler hamle yapamaz.", 'warning');
                 return;
             }
-            // "Oyun bitti" ekranı açıksa tıklamayı engelle
-            if (gameOverOverlay.style.display === 'flex') {
+            // "Oyun bitti" veya "Çark" ekranı açıksa tıklamayı engelle
+            if (gameOverOverlay.style.display === 'flex' || wheelOverlay.style.display === 'flex') {
                 return;
             }
             const row = cell.dataset.row;
@@ -366,9 +401,8 @@
             }));
         });
 
-        // Loglama Fonksiyonu (Değişiklik yok)
+        // Loglama Fonksiyonu
         function logMessage(msg, type = 'info') {
-            // ... (Kodunuzun bu kısmı değişmedi) ...
             let textClass = 'text-info';
             if (type === 'danger') { textClass = 'text-danger'; }
             else if (type === 'success') { textClass = 'text-success'; }
@@ -380,7 +414,7 @@
             messageLog.appendChild(p);
             messageLog.scrollTop = messageLog.scrollHeight;
         }
-        
+
         // İlk tahtayı çiz
         renderBoard({{ game.board_state|safe }});
     </script>
