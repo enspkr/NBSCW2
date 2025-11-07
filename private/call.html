@@ -3,8 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Synapse Call</title>
+    <title>Private Call 😉</title>
     <script src="/socket.io/socket.io.js"></script>
+    <head>
+    <head>
     <style>
         :root {
             --dark-bg: #121212;
@@ -25,15 +27,30 @@
         #unpinned-bar { width: 100%; height: 15%; display: flex; justify-content: center; align-items: center; gap: 0.5rem; padding-bottom: 5px; }
         .video-container.unpinned { height: 100%; width: auto; aspect-ratio: 16 / 9; flex-shrink: 0; }
 
-        video { width: 100%; height: 100%; object-fit: contain; transform: scaleX(-1); }
-        video.screen-share { transform: scaleX(1); }
+        /* --- THE DEFINITIVE FIX --- */
+        /* By default, no videos are mirrored. */
+        video { 
+            width: 100%; 
+            height: 100%; 
+            object-fit: contain; 
+        }
+        
+        /* ONLY mirror the local video feed. */
+        #local-video {
+            transform: scaleX(-1);
+        }
+
+        /* When the local video is a screen share, UN-MIRROR it. */
+        #local-video.screen-share { 
+            transform: scaleX(1); 
+        }
+
         .username-overlay { position: absolute; bottom: 8px; left: 8px; background: rgba(0,0,0,0.6); padding: 5px 10px; border-radius: 6px; z-index: 10; }
-        #local-video-container { border: 2px solid var(--primary-accent); }
+        
 
         .pin-btn { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; background-color: rgba(0,0,0,0.6); border: none; border-radius: 6px; cursor: pointer; z-index: 10; display: flex; align-items: center; justify-content: center; color: white; opacity: 0; transition: opacity 0.2s ease; }
         .video-container:hover .pin-btn { opacity: 1; }
 
-        /* --- NEW: Style for the mute icon --- */
         .mute-indicator {
             position: absolute;
             top: 8px;
@@ -59,6 +76,110 @@
         #controls button.active { background-color: var(--red-accent); }
         #hangup-btn { background-color: var(--red-accent); }
         #hangup-btn:hover { background-color: var(--red-accent-hover); }
+                /* --- NEW: Container for client-side controls --- */
+        .client-controls {
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            display: flex;
+            gap: 8px;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            z-index: 10;
+        }
+        .video-container:hover .client-controls {
+            opacity: 1;
+        }
+        .client-controls button {
+            width: 32px;
+            height: 32px;
+            background-color: rgba(0,0,0,0.6);
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+        /* --- NEW MODAL STYLES --- */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: none; /* Hidden by default */
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+        }
+        .modal-overlay.visible {
+            display: flex; /* Show when active */
+        }
+        .modal-content {
+            background-color: var(--secondary-surface);
+            padding: 2rem;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+        }
+        .modal-buttons {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+        .modal-buttons button {
+             padding: 0.75rem 1.5rem; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; background-color: #4a4a4a; color: white;
+        }
+        #hd-quality-btn {
+            background-color: var(--primary-accent);
+        }
+        /* --- NEW: Style for the speaking indicator --- */
+        .video-container.is-speaking {
+            border: 3px solid #007acc; /* A bright blue glow */
+        }
+        /* --- NEW CHAT STYLES --- */
+        #chat-container {
+            position: fixed;
+            right: 0;
+            top: 0;
+            width: 300px;
+            height: 100%;
+            background-color: var(--primary-surface);
+            display: flex;
+            flex-direction: column;
+            border-left: 1px solid #444;
+            z-index: 50;
+        }
+        #messages {
+            list-style-type: none;
+            margin: 0;
+            padding: 1rem;
+            flex-grow: 1;
+            overflow-y: auto;
+        }
+        #messages li {
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #333;
+        }
+        #chat-form {
+            padding: 1rem;
+            display: flex;
+        }
+        #chat-input {
+            border: 1px solid #444;
+            padding: 0.75rem;
+            flex-grow: 1;
+            border-radius: 8px;
+            margin-right: 1rem;
+            background-color: var(--secondary-surface);
+            color: white;
+        }
+        #chat-form button {
+            background: var(--primary-accent); border: none; padding: 0.75rem 1rem; border-radius: 8px; color: white; cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -71,6 +192,13 @@
         </div>
     </main>
 
+    <div id="chat-container">
+        <ul id="messages"></ul>
+        <form id="chat-form" action="">
+            <input id="chat-input" autocomplete="off" /><button>Send</button>
+        </form>
+    </div>
+
     <div id="controls">
         <button id="mute-btn">Mute Mic</button>
         <button id="camera-btn">Turn Camera Off</button>
@@ -82,7 +210,7 @@
         const videoGrid = document.getElementById('video-grid');
         const localVideo = document.getElementById('local-video');
         const peerConnections = {};
-        const pendingOffers = {}; // Gelen teklifleri geçici olarak burada tutacağız
+        const audioAnalyzers = {}; // NEW: To store audio analysis data
         let localStream, screenStream;
         let isScreenSharing = false;
 
@@ -113,7 +241,17 @@
                 videoGrid.appendChild(newUnpinnedBar);
             }
         }
-
+        
+        function setMuteIndicator(container, isMuted) {
+            let indicator = container.querySelector('.mute-indicator');
+            if (!indicator) {
+                indicator = document.createElement('div');
+                indicator.className = 'mute-indicator';
+                indicator.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5z"></path><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>`;
+                container.appendChild(indicator);
+            }
+            indicator.classList.toggle('visible', isMuted);
+        }
 
         function addPinButton(videoContainer) {
             const pinBtn = document.createElement('button');
@@ -139,43 +277,111 @@
             indicator.classList.toggle('visible', isMuted);
         }
 
+        function setupLocalSpeakingIndicator(stream) {
+            const container = document.getElementById('local-video-container');
+            const audioContext = new AudioContext();
+            const analyser = audioContext.createAnalyser();
+            analyser.fftSize = 256;
+            
+            const source = audioContext.createMediaStreamSource(stream);
+            source.connect(analyser);
+
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+            function checkVolume() {
+                analyser.getByteFrequencyData(dataArray);
+                const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+                
+                // Use a threshold to detect speech
+                if (average > 15) { // You can adjust this threshold
+                    container.classList.add('is-speaking');
+                } else {
+                    container.classList.remove('is-speaking');
+                }
+                requestAnimationFrame(checkVolume);
+            }
+            requestAnimationFrame(checkVolume);
+        }
+
         async function main() {
             try {
+                // Step 1: Get camera and mic access first.
                 localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
                 localVideo.srcObject = localStream;
                 addPinButton(document.getElementById('local-video-container'));
 
+                setupLocalSpeakingIndicator(localStream);
+
+                // Step 2: Connect to the server.
                 const token = localStorage.getItem('synapse-token');
                 if (!token) { window.location.href = '/'; return; }
                 const socket = io({ auth: { token } });
 
-                // --- Signaling Listeners (Unchanged from your version) ---
-                socket.on('existing-users', (users) => { for (const [socketId, username] of Object.entries(users)) { createPeerConnection(socketId, true, username, socket); } });
-                socket.on('user-joined', (socketId, username) => { createPeerConnection(socketId, false, username, socket); });
-                socket.on('webrtc-offer', async (fromSocketId, offer) => {
-                const pc = peerConnections[fromSocketId];
-                // Eğer peer connection hazırsa, teklifi hemen işle.
-                if (pc) {
-                    await pc.setRemoteDescription(new RTCSessionDescription(offer));
-                    const answer = await pc.createAnswer();
-                    await pc.setLocalDescription(answer);
-                    socket.emit('webrtc-answer', fromSocketId, pc.localDescription);
-                } else {
-                    // Eğer hazır değilse, teklifi bekleme listesine (kuyruğa) al.
-                    pendingOffers[fromSocketId] = offer;
-                }
-            });
-                socket.on('webrtc-answer', (fromSocketId, answer) => { const pc = peerConnections[fromSocketId]; if (pc) pc.setRemoteDescription(new RTCSessionDescription(answer)); });
-                socket.on('webrtc-ice-candidate', (fromSocketId, candidate) => { const pc = peerConnections[fromSocketId]; if (pc) pc.addIceCandidate(new RTCIceCandidate(candidate)); });
-                socket.on('user-left', (socketId) => { if (peerConnections[socketId]) { peerConnections[socketId].close(); delete peerConnections[socketId]; } const containerToRemove = document.getElementById(socketId); if (containerToRemove) { if (containerToRemove.classList.contains('pinned')) { togglePin(containerToRemove); } containerToRemove.remove(); } });
-
-                // --- NEW: Mute Status Listener ---
+                // Step 3: Set up all signaling listeners.
+                socket.on('existing-users', (users) => {
+                    for (const [socketId, userData] of Object.entries(users)) {
+                        createPeerConnection(socketId, true, userData, socket);
+                    }
+                });
+                socket.on('user-joined', (socketId, userData) => {
+                    // --- NEW PROTECTION LOGIC ---
+                    // Before adding the new user, check for and remove any "ghost" duplicates.
+                    // This handles rapid reconnects where the 'user-left' event hasn't processed yet.
+                    document.querySelectorAll('.video-container').forEach(container => {
+                        const usernameDiv = container.querySelector('.username-overlay');
+                        // If a container with the same username already exists (and isn't our own)
+                        if (usernameDiv && usernameDiv.textContent === userData.username && container.id !== 'local-video-container') {
+                            console.warn(`Duplicate user found for ${userData.username}. Cleaning up old connection.`);
+                            const oldSocketId = container.id;
+                            
+                            // Clean up all old resources associated with the ghost user
+                            if (peerConnections[oldSocketId]) {
+                                peerConnections[oldSocketId].close();
+                                delete peerConnections[oldSocketId];
+                            }
+                            if (audioAnalyzers[oldSocketId]) {
+                                cancelAnimationFrame(audioAnalyzers[oldSocketId].loopId);
+                                delete audioAnalyzers[oldSocketId];
+                            }
+                            container.remove();
+                        }
+                    });
+                    // --- END OF NEW LOGIC ---
+                    // Now, create the connection for the new, legitimate user.
+                    createPeerConnection(socketId, false, userData, socket);
+                });
                 socket.on('user-mute-status', (socketId, isMuted) => {
                     const container = document.getElementById(socketId);
                     if (container) setMuteIndicator(container, isMuted);
                 });
+                socket.on('webrtc-offer', (fromSocketId, offer) => { const pc = peerConnections[fromSocketId]; if (pc) { pc.setRemoteDescription(new RTCSessionDescription(offer)).then(() => pc.createAnswer()).then(answer => pc.setLocalDescription(answer)).then(() => socket.emit('webrtc-answer', fromSocketId, pc.localDescription)); } });
+                socket.on('webrtc-answer', (fromSocketId, answer) => { const pc = peerConnections[fromSocketId]; if (pc) pc.setRemoteDescription(new RTCSessionDescription(answer)); });
+                socket.on('webrtc-ice-candidate', (fromSocketId, candidate) => { const pc = peerConnections[fromSocketId]; if (pc) pc.addIceCandidate(new RTCIceCandidate(candidate)); });
+                socket.on('user-left', (socketId) => {
+                    // 1. Stop the audio analysis loop first to prevent errors
+                    if (audioAnalyzers[socketId]) {
+                        cancelAnimationFrame(audioAnalyzers[socketId].loopId);
+                        delete audioAnalyzers[socketId];
+                    }
 
-                // --- MODIFIED: Mute Button Logic ---
+                    // 2. Close the WebRTC connection
+                    if (peerConnections[socketId]) {
+                        peerConnections[socketId].close();
+                        delete peerConnections[socketId];
+                    }
+
+                    // 3. Find and remove the video container from the screen
+                    const containerToRemove = document.getElementById(socketId);
+                    if (containerToRemove) {
+                        // If the user who left was the one pinned, reset the layout
+                        if (containerToRemove.classList.contains('pinned')) {
+                            togglePin(containerToRemove); // This just unpins everyone
+                        }
+                        containerToRemove.remove();
+                    }
+                });
+
+                // Step 4: Set up controls.
                 const muteBtn = document.getElementById('mute-btn');
                 muteBtn.addEventListener('click', () => {
                     const audioTrack = localStream.getAudioTracks()[0];
@@ -185,23 +391,156 @@
                         muteBtn.textContent = isMuted ? 'Unmute Mic' : 'Mute Mic';
                         muteBtn.classList.toggle('active', isMuted);
                         setMuteIndicator(document.getElementById('local-video-container'), isMuted);
+                        // This line tells everyone else you are muted
                         socket.emit('mute-status-changed', { isMuted });
                     }
                 });
                 
-                // --- Other Controls (Unchanged from your version) ---
                 const cameraBtn = document.getElementById('camera-btn');
                 cameraBtn.addEventListener('click', () => { if (isScreenSharing) return; const videoTrack = localStream.getVideoTracks()[0]; if (videoTrack) { videoTrack.enabled = !videoTrack.enabled; cameraBtn.textContent = videoTrack.enabled ? 'Turn Camera Off' : 'Turn Camera On'; cameraBtn.classList.toggle('active', !videoTrack.enabled); } });
-                document.getElementById('screen-share-btn').addEventListener('click', () => toggleScreenShare(socket));
+                
                 document.getElementById('hangup-btn').addEventListener('click', () => { window.location.href = '/'; });
-            } catch (err) { console.error("Fatal Error:", err); }
-        }
 
-        function createPeerConnection(socketId, isInitiator, username, socket) {
-            const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+                // --- NEW LOGIC FOR SCREEN SHARE MODAL ---
+                const qualityModal = document.getElementById('quality-modal');
+                const standardQualityBtn = document.getElementById('standard-quality-btn');
+                const hdQualityBtn = document.getElementById('hd-quality-btn');
+
+                // The "Share Screen" button now opens the modal.
+                document.getElementById('screen-share-btn').addEventListener('click', () => {
+                    if (isScreenSharing) {
+                        // If you're already sharing, just stop it.
+                        toggleScreenShare(false, socket);
+                    } else {
+                        // Otherwise, show the quality options.
+                        qualityModal.classList.add('visible');
+                    }
+                });
+                
+                // Listeners for the buttons inside the modal.
+                standardQualityBtn.addEventListener('click', () => {
+                    qualityModal.classList.remove('visible');
+                    toggleScreenShare(false, socket); // isHD = false
+                });
+
+                hdQualityBtn.addEventListener('click', () => {
+                    qualityModal.classList.remove('visible');
+                    toggleScreenShare(true, socket); // isHD = true
+                });
+
+                // Hide the modal if the user clicks the background overlay.
+                qualityModal.addEventListener('click', (e) => {
+                    if (e.target === qualityModal) {
+                        qualityModal.classList.remove('visible');
+                    }
+                });
+                // Inside your main() function
+
+                const messages = document.getElementById('messages');
+                const chatForm = document.getElementById('chat-form');
+                const chatInput = document.getElementById('chat-input');
+
+                chatForm.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    if (chatInput.value) {
+                        socket.emit('chat message', chatInput.value);
+                        chatInput.value = '';
+                    }
+                });
+
+                // In private/call.html
+
+                function addChatMessage({ username, message }) {
+                    const item = document.createElement('li');
+                    
+                    // Regular expression to find URLs in the message text
+                    const urlRegex = /(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])|(\bwww\.[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+
+                    // Replace found URLs with clickable <a> tags
+                    const processedMessage = message.replace(urlRegex, (url) => {
+                        let href = url;
+                        // Ensure links starting with 'www' work correctly
+                        if (!href.startsWith('http')) {
+                            href = `http://${href}`;
+                        }
+                        return `<a href="${href}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+                    });
+                    
+                    item.innerHTML = `<strong>${username}:</strong> ${processedMessage}`;
+                    messages.appendChild(item);
+                    messages.scrollTop = messages.scrollHeight;
+                }
+
+                socket.on('chat history', function(history) {
+                    history.forEach(msg => addChatMessage(msg));
+                });
+
+                socket.on('chat message', function(msg) {
+                    addChatMessage(msg);
+                });
+
+            } catch (err) { 
+                console.error("Fatal Error:", err); 
+                document.body.innerHTML = `<div style="text-align: center; padding-top: 50px;"><h1>Error</h1><p>Could not access camera/microphone. Please grant permission and refresh.</p></div>`;
+            }
+        }
+        // Add these icon variables at the top of your script
+        const speakerIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>`;
+        const speakerOffIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5z"></path><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>`;
+       // This is the new function to add the separate mute buttons
+        function addClientMuteControls(videoContainer) {
+            const controlsContainer = document.createElement('div');
+            controlsContainer.className = 'client-controls';
+
+            // Button to mute the user's voice (mic)
+            const muteVoiceBtn = document.createElement('button');
+            muteVoiceBtn.innerHTML = speakerIcon;
+            muteVoiceBtn.title = 'Mute Voice';
+            muteVoiceBtn.onclick = (e) => {
+                e.stopPropagation();
+                const audioEl = videoContainer.querySelector('.mic-audio');
+                if (audioEl) {
+                    audioEl.muted = !audioEl.muted;
+                    muteVoiceBtn.innerHTML = audioEl.muted ? speakerOffIcon : speakerIcon;
+                }
+            };
+
+            // Button to mute the stream's audio (screen share audio)
+            const muteStreamBtn = document.createElement('button');
+            muteStreamBtn.innerHTML = speakerIcon;
+            muteStreamBtn.title = 'Mute Stream';
+            muteStreamBtn.onclick = (e) => {
+                e.stopPropagation();
+                const videoEl = videoContainer.querySelector('video');
+                if (videoEl) {
+                    videoEl.muted = !videoEl.muted;
+                    muteStreamBtn.innerHTML = videoEl.muted ? speakerOffIcon : speakerIcon;
+                }
+            };
+
+            controlsContainer.appendChild(muteVoiceBtn);
+            controlsContainer.appendChild(muteStreamBtn);
+            videoContainer.appendChild(controlsContainer);
+        }
+        function createPeerConnection(socketId, isInitiator, userData, socket) {
+            const pc = new RTCPeerConnection({
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'turn:global.turn.twilio.com:3478?transport=udp', username: '7b73723165731b74730b206a6a2a2b72', credential: 'password' }
+                ]
+            });
             peerConnections[socketId] = pc;
-            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+            // --- Sending logic is correct and remains unchanged ---
+            const streamToSend = isScreenSharing ? screenStream : localStream;
+            streamToSend.getTracks().forEach(track => pc.addTrack(track, streamToSend));
+            if (isScreenSharing) {
+                localStream.getAudioTracks().forEach(track => pc.addTrack(track, localStream));
+            }
+
             pc.onicecandidate = (event) => { if (event.candidate) { socket.emit('webrtc-ice-candidate', socketId, event.candidate); } };
+
+            // --- THIS IS THE CORRECTED RECEIVING LOGIC ---
             pc.ontrack = (event) => {
                 let videoContainer = document.getElementById(socketId);
                 if (!videoContainer) {
@@ -211,64 +550,73 @@
                     const remoteVideo = document.createElement('video');
                     remoteVideo.autoplay = true;
                     remoteVideo.playsInline = true;
+                    const micAudio = document.createElement('audio');
+                    micAudio.autoplay = true;
+                    micAudio.className = 'mic-audio';
                     const usernameDiv = document.createElement('div');
                     usernameDiv.className = 'username-overlay';
-                    usernameDiv.textContent = username;
+                    usernameDiv.textContent = userData.username;
                     videoContainer.appendChild(remoteVideo);
+                    videoContainer.appendChild(micAudio);
                     videoContainer.appendChild(usernameDiv);
                     addPinButton(videoContainer);
+                    addClientMuteControls(videoContainer);
                     videoGrid.appendChild(videoContainer);
+                    setMuteIndicator(videoContainer, userData.isMuted);
                 }
-                videoContainer.querySelector('video').srcObject = event.streams[0];
-            };
-            if (pendingOffers[socketId]) {
-                console.log("İşleniyor bekleyen teklif:", socketId);
-                const offer = pendingOffers[socketId];
-                pc.setRemoteDescription(new RTCSessionDescription(offer))
-                    .then(() => pc.createAnswer())
-                    .then(answer => pc.setLocalDescription(answer))
-                    .then(() => {
-                        socket.emit('webrtc-answer', socketId, pc.localDescription);
-                        delete pendingOffers[socketId]; // Teklifi işledikten sonra kuyruktan sil.
-                    })
-                    .catch(err => console.error("Bekleyen teklif işlenirken hata:", err));
-            } 
-            
-            else if (isInitiator) {
-                    console.log("Yeni teklif oluşturuluyor:", socketId);
-                    pc.createOffer()
-                    .then(offer => pc.setLocalDescription(offer))
-                    .then(() => socket.emit('webrtc-offer', socketId, pc.localDescription));
-            }
-            
-        
-        }
 
-        async function toggleScreenShare(socket) {
+                const videoEl = videoContainer.querySelector('video');
+                const audioEl = videoContainer.querySelector('.mic-audio');
+                
+                if (event.track.kind === 'video') {
+                    // Always put video tracks in the video element.
+                    videoEl.srcObject = new MediaStream([event.track]);
+                } else if (event.track.kind === 'audio') {
+                    // If the invisible audio element is empty, this must be the microphone.
+                    if (!audioEl.srcObject) {
+                        const micStream = new MediaStream([event.track]);
+                        audioEl.srcObject = micStream;
+                        setupSpeakingIndicator(videoContainer, micStream, socketId);
+                    } else { // Otherwise, this must be the screen share audio.
+                        // Add this audio track to the video element's stream.
+                        if (videoEl.srcObject) {
+                            videoEl.srcObject.addTrack(event.track);
+                        }
+                    }
+                }
+            };
+
+            if (isInitiator) { pc.createOffer().then(offer => pc.setLocalDescription(offer)).then(() => socket.emit('webrtc-offer', socketId, pc.localDescription)); }
+        }
+        async function toggleScreenShare(isHD, socket) {
             const screenShareBtn = document.getElementById('screen-share-btn');
             if (!isScreenSharing) {
                 try {
-                    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true});
+                    const displayMediaOptions = {
+                        video: isHD ? { cursor: "always", width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } } : true,
+                        audio: true
+                    };
+
+                    screenStream = await navigator.mediaDevices.getDisplayMedia(displayMediaOptions);
                     isScreenSharing = true;
                     localVideo.srcObject = screenStream;
-                    localVideo.classList.add('screen-share');
+                    localVideo.style.transform = 'scaleX(1)';
+                    
                     await replaceTrack(screenStream.getVideoTracks()[0]);
+                    if (screenStream.getAudioTracks().length > 0) { await replaceTrack(screenStream.getAudioTracks()[0]); }
+                    
                     screenShareBtn.textContent = 'Stop Sharing';
                     screenShareBtn.classList.add('active');
-                    screenStream.getVideoTracks()[0].onended = () => {
-                        if (isScreenSharing) {
-                            toggleScreenShare(socket);
-                        }
-                    };
-                } catch (err) {
-                    console.error("Screen share error", err);
-                    isScreenSharing = false;
-                }
+                    screenStream.getVideoTracks()[0].onended = () => { if (isScreenSharing) { toggleScreenShare(false, socket); } };
+                } catch (err) { console.error("Screen share error", err); isScreenSharing = false; }
             } else {
                 isScreenSharing = false;
                 localVideo.srcObject = localStream;
-                localVideo.classList.remove('screen-share');
+                localVideo.style.transform = 'scaleX(-1)';
+                
                 await replaceTrack(localStream.getVideoTracks()[0]);
+                await replaceTrack(localStream.getAudioTracks()[0]);
+                
                 screenStream.getTracks().forEach(track => track.stop());
                 screenShareBtn.textContent = 'Share Screen';
                 screenShareBtn.classList.remove('active');
@@ -277,8 +625,10 @@
 
         async function replaceTrack(newTrack) {
             for (const pc of Object.values(peerConnections)) {
-                const sender = pc.getSenders().find(s => s.track.kind === 'video');
+                // Find the sender responsible for that type of track (video or audio)
+                const sender = pc.getSenders().find(s => s.track && s.track.kind === newTrack.kind);
                 if (sender) {
+                    // Seamlessly replace the track being sent
                     await sender.replaceTrack(newTrack);
                 }
             }
@@ -286,5 +636,16 @@
         
         main();
     </script>
+
+    <div id="quality-modal" class="modal-overlay">
+        <div class="modal-content">
+            <h2>Choose Screen Share Quality</h2>
+            <div class="modal-buttons">
+                <button id="standard-quality-btn">Standard</button>
+                <button id="hd-quality-btn">High Quality (HD)</button>
+            </div>
+        </div>
+    </div>
+
 </body>
 </html>
