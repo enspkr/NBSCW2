@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+
+{% block title %}Oyun Lobisi{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-10 col-lg-8">
+
+        <div class="card shadow-sm mb-4 text-bg-dark border-secondary">
+            <div class="card-body text-center">
+                <form action="{% url 'create_game' %}" method="POST">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-primary btn-lg px-5">
+                        Yeni Masa Oluştur
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card shadow-sm mb-4 text-bg-dark border-secondary">
+            <div class="card-header fs-5 border-secondary">
+                Devam Eden Oyunlarım
+            </div>
+            <div class="list-group list-group-flush">
+                {% for game in my_games %}
+                    <a href="{% url 'game_room' game.game_id %}" class="list-group-item list-group-item-action list-group-item-dark d-flex justify-content-between align-items-center bg-dark text-light">
+                        <div>
+                            <strong>{{ game.player1.username }}</strong> vs <strong>{{ game.player2.username|default:"Rakip Bekliyor" }}</strong>
+                            <small class="d-block text-muted">Masa #{{ game.game_id|truncatechars:8 }}</small>
+                        </div>
+                        <span class="badge bg-info rounded-pill">{{ game.get_status_display }}</span>
+                    </a>
+                {% empty %}
+                    <div class="list-group-item list-group-item-dark bg-dark text-light">
+                        <p class="mb-0 text-muted">Aktif oyunun bulunmuyor.</p>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="card shadow-sm mb-4 text-bg-dark border-secondary">
+            <div class="card-header fs-5 border-secondary">
+                Açık Masalar
+            </div>
+            <div class="list-group list-group-flush">
+                {% for game in available_games %}
+                    {% if game.player1 != request.user %}
+                        <a href="{% url 'game_room' game.game_id %}" class="list-group-item list-group-item-action list-group-item-dark d-flex justify-content-between align-items-center bg-dark text-light">
+                            <div>
+                                <strong>{{ game.player1.username }}</strong>'nin Masası
+                                <small class="d-block text-muted">Masa #{{ game.game_id|truncatechars:8 }}</small>
+                            </div>
+                            <span class="btn btn-success btn-sm">Hemen Katıl</span>
+                        </a>
+                    {% endif %}
+                {% empty %}
+                    <div class="list-group-item list-group-item-dark bg-dark text-light">
+                        <p class="mb-0 text-muted">Katılabileceğin açık masa bulunmuyor.</p>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}

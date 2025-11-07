@@ -1,0 +1,232 @@
+{% extends 'base.html' %}
+
+{% block title %}Oyun Odası - {{ game.game_id|truncatechars:8 }}{% endblock %}
+
+{% block extra_css %}
+    <style>
+        #game-board {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            grid-template-rows: repeat(5, 1fr);
+            border: 2px solid #6c757d; /* border-secondary */
+            width: 100%;
+            aspect-ratio: 1 / 1; 
+            max-width: 500px; 
+            background-color: #343a40; /* bg-secondary */
+        }
+        .cell {
+            border: 1px solid #495057; /* Koyu sınır */
+            box-sizing: border-box;
+            text-align: center;
+            font-size: 2rem; 
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            user-select: none;
+            color: #f8f9fa; /* text-light (Sayılar için) */
+        }
+        .cell:hover {
+            background-color: #495057; /* Koyu hover */
+        }
+        
+        /* Oyuncu Renkleri (Koyu BG, Açık Text) */
+        .cell.p1 { background-color: #a00; color: #f8f9fa; }
+        .cell.p2 { background-color: #00a; color: #f8f9fa; }
+
+        /* Mesaj Logu Stilleri (Koyu) */
+        #message-log {
+            height: 250px;
+            overflow-y: scroll;
+            background: #343a40; /* bg-secondary */
+            border-radius: 0.25rem;
+            border: 1px solid #495057;
+            color: #f8f9fa; /* text-light */
+        }
+        /* JS'den gelen loglar için renkler */
+        #message-log p { margin: 0; padding: 2px 8px; }
+    </style>
+{% endblock %}
+
+
+{% block content %}
+    <h1 class="mb-4">Oyun Odası</h1>
+        
+    <div class="row">
+        <div class="col-lg-7 col-md-8 mb-4">
+            <div id="game-board">
+                </div>
+        </div>
+
+        <div class="col-lg-5 col-md-4">
+            <div class="card shadow-sm text-bg-dark border-secondary">
+                <div class="card-header fs-5 border-secondary">
+                    Oyun Bilgileri
+                </div>
+                <div class="card-body">
+                    <h5 id="turn-indicator" class="card-title mb-3">
+                        Sıra: {{ game.current_turn.username|default:"Oyun başlıyor..." }}
+                    </h5>
+                    <p class="mb-1">
+                        <strong>Oyuncu 1 (Kırmızı):</strong> {{ game.player1.username }}
+                    </p>
+                    <p>
+                        <strong>Oyuncu 2 (Mavi):</strong> 
+                        <span id="player2-name">{{ game.player2.username|default:"Rakip bekleniyor..." }}</span>
+                    </p>
+
+                    {% if is_spectator %}
+                    <div class="alert alert-dark border-warning text-warning" role="alert">
+                        <strong>İzleyici modundasınız.</strong> Hamle yapamazsınız.
+                    </div>
+                    {% endif %}
+
+                    <hr class="border-secondary">
+                    
+                    <label for="message-log" class="form-label">Oyun Kayıtları:</label>
+                    <div id="message-log" class="p-2">
+                        </div>
+                    
+                    <a href="{% url 'game_lobby' %}" class="btn btn-secondary mt-3 w-100">Lobiden Ayrıl</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {{ game_id_json|json_script:"game-id" }}
+    {{ username_json|json_script:"current-username" }}
+    {{ is_spectator|json_script:"is-spectator" }}
+{% endblock %}
+
+
+{% block extra_js %}
+    <script>
+        // DOM elementleri ve veriler
+        const gameId = JSON.parse(document.getElementById('game-id').textContent);
+        const myUsername = JSON.parse(document.getElementById('current-username').textContent);
+        const isSpectator = JSON.parse(document.getElementById('is-spectator').textContent);
+        
+        const boardElement = document.getElementById('game-board');
+        const turnIndicator = document.getElementById('turn-indicator');
+        const player2Name = document.getElementById('player2-name');
+        const messageLog = document.getElementById('message-log');
+        
+        let player1Username = '{{ game.player1.username }}';
+        let player2Username = '{{ game.player2.username|default_if_none:"" }}';
+        
+        // WebSocket Bağlantısı
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const gameSocket = new WebSocket(
+            wsProtocol + '//' + window.location.host + '/ws/game/' + gameId + '/'
+        );
+
+        // Sunucudan Mesaj Alma
+        gameSocket.onmessage = function(e) {
+            const data = JSON.parse(e.data);
+            console.log("Sunucudan alındı:", data);
+
+            if (data.type === 'error') {
+                logMessage(data.message, 'danger'); // 'danger' -> text-danger
+                return;
+            }
+
+            if (data.type === 'game_state') {
+                player1Username = data.p1;
+                player2Username = data.p2 || "";
+                player2Name.textContent = data.p2 || "Rakip bekleniyor...";
+
+                if (data.status === 'finished') {
+                    turnIndicator.textContent = "Oyun Bitti!";
+                    logMessage("Kazanan: " + data.winner, 'success'); // 'success' -> text-success
+                } else if (data.status === 'waiting') {
+                    turnIndicator.textContent = "Rakip bekleniyor...";
+                } else {
+                    turnIndicator.textContent = "Sıra: " + data.turn;
+                }
+                
+                renderBoard(data.state);
+                
+                if (data.message) {
+                    logMessage(data.message, 'info'); // 'info' -> text-info
+                }
+            }
+        };
+
+        gameSocket.onclose = function(e) {
+            console.error('WebSocket bağlantısı kapandı.');
+            logMessage('Sunucuyla bağlantı koptu. Sayfayı yenileyin.', 'danger');
+            turnIndicator.textContent = "Bağlantı Kesildi";
+        };
+        
+        gameSocket.onopen = function(e) {
+            logMessage('Oyun masasına başarıyla bağlandınız.', 'success');
+        };
+
+        // Tahta Çizme
+        function renderBoard(boardState) {
+            boardElement.innerHTML = ''; 
+            for (let r = 0; r < 5; r++) {
+                for (let c = 0; c < 5; c++) {
+                    const cellElement = document.createElement('div');
+                    cellElement.classList.add('cell');
+                    cellElement.dataset.row = r;
+                    cellElement.dataset.col = c;
+                    
+                    const cellData = boardState[r][c];
+                    
+                    if (cellData) {
+                        cellElement.textContent = cellData.count;
+                        if (cellData.owner === player1Username) {
+                            cellElement.classList.add('p1');
+                        } else if (cellData.owner === player2Username) {
+                            cellElement.classList.add('p2');
+                        }
+                    } else {
+                        cellElement.textContent = '';
+                    }
+                    boardElement.appendChild(cellElement);
+                }
+            }
+        }
+
+        // Hamle Gönderme
+        boardElement.addEventListener('click', function(e) {
+            const cell = e.target.closest('.cell');
+            if (!cell) return;
+            if (isSpectator) {
+                logMessage("İzleyiciler hamle yapamaz.", 'warning');
+                return;
+            }
+            const row = cell.dataset.row;
+            const col = cell.dataset.col;
+            gameSocket.send(JSON.stringify({
+                'type': 'make_move',
+                'row': parseInt(row),
+                'col': parseInt(col)
+            }));
+        });
+
+        // *** GÜNCELLENMİŞ Loglama Fonksiyonu (Koyu Tema) ***
+        function logMessage(msg, type = 'info') {
+            // 'type' -> danger, success, info, warning (Bootstrap text-X sınıfları)
+            let textClass = 'text-info'; // varsayılan
+            if (type === 'danger') { textClass = 'text-danger'; }
+            else if (type === 'success') { textClass = 'text-success'; }
+            else if (type === 'warning') { textClass = 'text-warning'; }
+            else if (type === 'secondary') { textClass = 'text-secondary'; }
+            
+            const p = document.createElement('p');
+            p.classList.add('m-0', 'small', textClass);
+            p.textContent = msg;
+
+            messageLog.appendChild(p);
+            // Otomatik olarak en alta kaydır
+            messageLog.scrollTop = messageLog.scrollHeight;
+        }
+        
+        // İlk tahtayı çiz
+        renderBoard({{ game.board_state|safe }});
+    </script>
+{% endblock %}
