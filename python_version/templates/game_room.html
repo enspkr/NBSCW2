@@ -4,21 +4,37 @@
 
 {% block extra_css %}
     <style>
+        :root {
+            --p1-color: #d90429; /* Canlı Kırmızı */
+            --p2-color: #0077b6; /* Canlı Mavi */
+            --board-bg: #212529; /* Koyu Gri */
+            --cell-border: #495057;
+            --cell-hover: #343a40;
+        }
+
+        #game-board-container {
+            position: relative; /* Patlama ve "Oyun Bitti" ekranı için */
+            width: 100%;
+            max-width: 500px; /* Maksimum genişlik */
+            margin: auto; /* Ortala */
+        }
+
         #game-board {
             display: grid;
             grid-template-columns: repeat(5, 1fr);
             grid-template-rows: repeat(5, 1fr);
-            border: 2px solid #6c757d; /* border-secondary */
+            border: 2px solid var(--cell-border);
+            border-radius: 8px; /* Yumuşak kenarlar */
             width: 100%;
-            aspect-ratio: 1 / 1; 
-            max-width: 500px; 
-            background-color: #343a40; /* bg-secondary */
+            aspect-ratio: 1 / 1;
+            background-color: var(--board-bg);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4); /* Gölgelendirme */
         }
+
         .cell {
-            border: 1px solid #495057; /* Koyu sınır */
+            border: 1px solid var(--cell-border);
             box-sizing: border-box;
-            text-align: center;
-            font-size: 2rem; 
+            font-size: 2.2rem; /* Zar ikonları için büyük boyut */
             font-weight: bold;
             display: flex;
             align-items: center;
@@ -26,15 +42,48 @@
             cursor: pointer;
             transition: all 0.2s ease;
             user-select: none;
-            color: #f8f9fa; /* text-light (Sayılar için) */
+            color: #fff; /* İkon rengi (her zaman beyaz) */
+            position: relative; /* Patlama efekti için */
         }
+
         .cell:hover {
-            background-color: #495057; /* Koyu hover */
+            background-color: var(--cell-hover);
         }
-        
-        /* Oyuncu Renkleri (Koyu BG, Açık Text) */
-        .cell.p1 { background-color: #a00; color: #f8f9fa; }
-        .cell.p2 { background-color: #00a; color: #f8f9fa; }
+
+        /* Oyuncu Renkleri */
+        .cell.p1 { background-color: var(--p1-color); }
+        .cell.p2 { background-color: var(--p2-color); }
+
+        /* Patlama Animasyonu */
+        .cell.explode::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: #fff;
+            border-radius: 50%;
+            opacity: 0.7;
+            animation: boom 0.4s ease-out;
+        }
+
+        @keyframes boom {
+            0% { transform: scale(0.2); opacity: 0.7; }
+            100% { transform: scale(1.5); opacity: 0; }
+        }
+
+        /* Oyun Bitti Ekranı */
+        #game-over-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: rgba(0, 0, 0, 0.85);
+            color: #fff;
+            display: none; /* JS ile 'flex' yapılacak */
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            border-radius: 8px;
+            text-align: center;
+        }
 
         /* Mesaj Logu Stilleri (Koyu) */
         #message-log {
@@ -45,7 +94,6 @@
             border: 1px solid #495057;
             color: #f8f9fa; /* text-light */
         }
-        /* JS'den gelen loglar için renkler */
         #message-log p { margin: 0; padding: 2px 8px; }
     </style>
 {% endblock %}
@@ -56,8 +104,18 @@
         
     <div class="row">
         <div class="col-lg-7 col-md-8 mb-4">
-            <div id="game-board">
+
+            <div id="game-board-container">
+                <div id="game-over-overlay">
+                    <h2 class="mb-3">Oyun Bitti!</h2>
+                    <h4 class="mb-4">Kazanan: <span id="winner-name">...</span></h4>
+                    <a href="{% url 'game_lobby' %}" class="btn btn-primary btn-lg">Yeni Oyun</a>
                 </div>
+
+                <div id="game-board">
+                </div>
+            </div>
+
         </div>
 
         <div class="col-lg-5 col-md-4">
@@ -70,10 +128,10 @@
                         Sıra: {{ game.current_turn.username|default:"Oyun başlıyor..." }}
                     </h5>
                     <p class="mb-1">
-                        <strong>Oyuncu 1 (Kırmızı):</strong> {{ game.player1.username }}
+                        <strong><i class="fas fa-circle text-danger"></i> Oyuncu 1:</strong> {{ game.player1.username }}
                     </p>
                     <p>
-                        <strong>Oyuncu 2 (Mavi):</strong> 
+                        <strong><i class="fas fa-circle text-primary"></i> Oyuncu 2:</strong>
                         <span id="player2-name">{{ game.player2.username|default:"Rakip bekleniyor..." }}</span>
                     </p>
 
@@ -112,10 +170,19 @@
         const turnIndicator = document.getElementById('turn-indicator');
         const player2Name = document.getElementById('player2-name');
         const messageLog = document.getElementById('message-log');
-        
+        const gameOverOverlay = document.getElementById('game-over-overlay');
+        const winnerNameEl = document.getElementById('winner-name');
+
         let player1Username = '{{ game.player1.username }}';
         let player2Username = '{{ game.player2.username|default_if_none:"" }}';
-        
+
+        // 1, 2, 3 sayılarını Font Awesome zar ikonlarına çevirir
+        const diceIcons = {
+            1: 'fa-dice-one',
+            2: 'fa-dice-two',
+            3: 'fa-dice-three'
+        };
+
         // WebSocket Bağlantısı
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const gameSocket = new WebSocket(
@@ -128,7 +195,7 @@
             console.log("Sunucudan alındı:", data);
 
             if (data.type === 'error') {
-                logMessage(data.message, 'danger'); // 'danger' -> text-danger
+                logMessage(data.message, 'danger');
                 return;
             }
 
@@ -137,19 +204,31 @@
                 player2Username = data.p2 || "";
                 player2Name.textContent = data.p2 || "Rakip bekleniyor...";
 
+                // *** YENİ: Kazanan ve Oyun Bitti Kontrolü ***
                 if (data.status === 'finished') {
                     turnIndicator.textContent = "Oyun Bitti!";
-                    logMessage("Kazanan: " + data.winner, 'success'); // 'success' -> text-success
+                    logMessage("Kazanan: " + data.winner, 'success');
+
+                    // "Oyun Bitti" ekranını göster
+                    winnerNameEl.textContent = data.winner;
+                    gameOverOverlay.style.display = 'flex';
+
                 } else if (data.status === 'waiting') {
                     turnIndicator.textContent = "Rakip bekleniyor...";
                 } else {
                     turnIndicator.textContent = "Sıra: " + data.turn;
                 }
-                
-                renderBoard(data.state);
-                
+
+                // *** YENİ: Patlama Animasyonunu Tetikle ***
+                if (data.exploded_cells && data.exploded_cells.length > 0) {
+                    triggerExplosions(data.exploded_cells, data.state);
+                } else {
+                    // Patlama yoksa, tahtayı hemen çiz
+                    renderBoard(data.state);
+                }
+
                 if (data.message) {
-                    logMessage(data.message, 'info'); // 'info' -> text-info
+                    logMessage(data.message, 'info');
                 }
             }
         };
@@ -159,44 +238,81 @@
             logMessage('Sunucuyla bağlantı koptu. Sayfayı yenileyin.', 'danger');
             turnIndicator.textContent = "Bağlantı Kesildi";
         };
-        
+
         gameSocket.onopen = function(e) {
             logMessage('Oyun masasına başarıyla bağlandınız.', 'success');
         };
 
-        // Tahta Çizme
+        // *** GÜNCELLENMİŞ: Tahta Çizme (Zar İkonlarıyla) ***
         function renderBoard(boardState) {
-            boardElement.innerHTML = ''; 
+            boardElement.innerHTML = '';
             for (let r = 0; r < 5; r++) {
                 for (let c = 0; c < 5; c++) {
                     const cellElement = document.createElement('div');
                     cellElement.classList.add('cell');
                     cellElement.dataset.row = r;
                     cellElement.dataset.col = c;
-                    
+
                     const cellData = boardState[r][c];
-                    
-                    if (cellData) {
-                        cellElement.textContent = cellData.count;
+
+                    // Hücre doluysa (None değilse) ve sayısı 0'dan büyükse
+                    if (cellData && cellData.count > 0) {
+
+                        // Zar ikonu varsa (1, 2, 3 için) ikonu bas
+                        if (diceIcons[cellData.count]) {
+                            const icon = document.createElement('i');
+                            icon.className = `fas ${diceIcons[cellData.count]}`;
+                            cellElement.appendChild(icon);
+                        } else {
+                            // Fallback (4+ beklenmez ama olursa sayıyı bas)
+                            cellElement.textContent = cellData.count;
+                        }
+
+                        // Oyuncu renklerini ata
                         if (cellData.owner === player1Username) {
                             cellElement.classList.add('p1');
                         } else if (cellData.owner === player2Username) {
                             cellElement.classList.add('p2');
                         }
+
                     } else {
-                        cellElement.textContent = '';
+                        // Hücre boşsa (None veya count: 0) içeriğini temizle
+                        cellElement.innerHTML = '';
                     }
                     boardElement.appendChild(cellElement);
                 }
             }
         }
 
-        // Hamle Gönderme
+        // *** YENİ: Patlama Animasyon Fonksiyonu ***
+        function triggerExplosions(explodedCells, finalBoardState) {
+            // 1. Tüm patlayan hücrelere animasyon sınıfını ekle
+            explodedCells.forEach(coords => {
+                const [r, c] = coords;
+                const cellEl = boardElement.querySelector(`.cell[data-row="${r}"][data-col="${c}"]`);
+                if (cellEl) {
+                    cellEl.classList.add('explode');
+                }
+            });
+
+            // 2. Animasyonun bitmesini bekle (CSS'de 0.4s = 400ms)
+            //    ve tahtanın son halini çiz.
+            setTimeout(() => {
+                renderBoard(finalBoardState);
+            }, 400);
+        }
+
+        // Hamle Gönderme (Değişiklik yok)
         boardElement.addEventListener('click', function(e) {
+            // ... (Kodunuzun bu kısmı değişmedi) ...
             const cell = e.target.closest('.cell');
             if (!cell) return;
             if (isSpectator) {
                 logMessage("İzleyiciler hamle yapamaz.", 'warning');
+                return;
+            }
+            // "Oyun bitti" ekranı açıksa tıklamayı engelle
+            if (gameOverOverlay.style.display === 'flex') {
                 return;
             }
             const row = cell.dataset.row;
@@ -208,21 +324,18 @@
             }));
         });
 
-        // *** GÜNCELLENMİŞ Loglama Fonksiyonu (Koyu Tema) ***
+        // Loglama Fonksiyonu (Değişiklik yok)
         function logMessage(msg, type = 'info') {
-            // 'type' -> danger, success, info, warning (Bootstrap text-X sınıfları)
-            let textClass = 'text-info'; // varsayılan
+            // ... (Kodunuzun bu kısmı değişmedi) ...
+            let textClass = 'text-info';
             if (type === 'danger') { textClass = 'text-danger'; }
             else if (type === 'success') { textClass = 'text-success'; }
             else if (type === 'warning') { textClass = 'text-warning'; }
-            else if (type === 'secondary') { textClass = 'text-secondary'; }
-            
+
             const p = document.createElement('p');
             p.classList.add('m-0', 'small', textClass);
             p.textContent = msg;
-
             messageLog.appendChild(p);
-            // Otomatik olarak en alta kaydır
             messageLog.scrollTop = messageLog.scrollHeight;
         }
         
