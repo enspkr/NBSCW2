@@ -108,6 +108,36 @@ def bum(game, row, col, username):
 
     # Bu fonksiyon 'game' objesini doğrudan değiştirdi,
     # bir şey döndürmesine gerek yok.
+def check_for_winner(game, current_player_user):
+    """
+    Tüm patlamalar bittikten sonra, rakibin taşı kalmış mı diye kontrol eder.
+    """
+    # Rakibi belirle
+    opponent = game.player2 if current_player_user == game.player1 else game.player1
+
+    # Eğer rakip henüz yoksa (lobi) veya bir şekilde None ise kontrol etme
+    if not opponent:
+        return
+
+    opponent_username = opponent.username
+    opponent_pieces = 0
+
+    # Tahtayı tara
+    for r in range(5):
+        for c in range(5):
+            cell = game.board_state[r][c]
+            # Rakibe ait bir hücre bulunduysa...
+            if cell and cell.get('owner') == opponent_username:
+                opponent_pieces += 1
+                break  # Arama yapmayı bırak, rakibin taşı var.
+        if opponent_pieces > 0:
+            break  # Dış döngüden de çık
+
+    # Döngüler bittiğinde rakibin hiç taşı bulunamadıysa...
+    if opponent_pieces == 0:
+        game.status = 'finished'
+        game.winner = current_player_user
+
 class VoiceChatConsumer(AsyncJsonWebsocketConsumer):
 
     # DB'den VoiceChannel objesini çeker
@@ -325,6 +355,7 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
     async def receive_json(self, content):
         """
         İstemciden (JS) bir mesaj aldığımızda (örn: hamle yapıldı).
+        (GÜNCELLENMİŞ VERSİYON - Animasyon ve Kazanan Kontrolü eklendi)
         """
         message_type = content.get('type')
         if not self.user.is_authenticated:
@@ -337,7 +368,7 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
 
             game = await self.get_game(self.game_id)
 
-            # --- OYUN GÜVENLİĞİ KONTROLLERİ ---
+            # --- GÜVENLİK KONTROLLERİ ---
             if game.status != 'in_progress':
                 await self.send_error("Oyun başlamadı veya bitti.")
                 return
@@ -346,33 +377,57 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
                 await self.send_error("Sıra sizde değil.")
                 return
 
-            # (Buraya oyunun 'geçerli hamle mi?' kuralını eklemelisin)
-            # Örneğin: hücre boş değilse ve sahibi siz değilseniz tıklayamazsınız
+            # --- GEÇERLİ HAMLE KONTROLÜ ---
             cell = game.board_state[row][col]
-            if not cell or cell['owner'] != self.user.username:
-                await self.send_error("Bu hücreye oynayamazsınız.")
+            if cell and cell.get('owner') != self.user.username:
+                await self.send_error("Bu hücre rakibinize ait.")
                 return
 
+            # --- İLK HAMLEYİ YAP ---
+            current_cell = game.board_state[row][col]
+            player_username = self.user.username
 
-            count =  cell['count'] + 1
-            if count == 4:
-                    cell['count'] = 0
-                    bum(game,row,col,self.user.username)
+            if current_cell is None:
+                game.board_state[row][col] = {'owner': player_username, 'count': 1}
+            else:
+                current_cell['count'] += 1
+                current_cell['owner'] = player_username
+
+            # --- ZİNCİRLEME REAKSİYON ---
+
+            # Animasyon için hangi hücrelerin patladığını takip et
+            exploded_cells_list = []
 
             cells_to_explode = find_critical_cells(game.board_state)
+
             while cells_to_explode:
                 r, c = cells_to_explode.pop(0)
-                bum(game,r,c,self.user.username)
+
+                # Bu hücrenin patladığını listeye ekle
+                if (r, c) not in exploded_cells_list:
+                    exploded_cells_list.append((r, c))
+
+                bum(game, r, c, player_username)
+
                 cells_to_explode = find_critical_cells(game.board_state)
 
-            game.board_state[row][col] = {'owner': self.user.username }
-            game.current_turn = game.player2 if self.user == game.player1 else game.player1
-            # --- Örnek Bitti ---
+            # --- KAZANAN KONTROLÜ ---
+            # Patlamalar bittikten sonra, bu hamle ile oyunu bitirdi mi?
+            check_for_winner(game, self.user)
+
+            # --- OYUNU BİTİR ---
+            if game.status != 'finished':
+                # Oyun bitmediyse sırayı değiştir
+                game.current_turn = game.player2 if self.user == game.player1 else game.player1
 
             await self.save_game(game)
 
-            # Herkese (oyuncular ve izleyiciler) yeni durumu yayınla
-            await self.broadcast_game_state(game, message=f"{self.user.username} hamle yaptı.")
+            # --- YAYINLA (Animasyon verisiyle birlikte) ---
+            await self.broadcast_game_state(
+                game,
+                message=f"{self.user.username} hamle yaptı.",
+                exploded_cells=exploded_cells_list  # <-- JS'e animasyon için gönder
+            )
 
     # --- Yardımcı Metodlar ---
 
