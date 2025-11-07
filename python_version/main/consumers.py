@@ -69,12 +69,45 @@ def find_critical_cells(board_state):
 
     # Listeyi döndür
     return critical_cells
-def bum(game,row,col,username):
+def bum(game, row, col, username):
+    """
+    (row, col) koordinatındaki hücreyi patlatır.
+    1. Patlayan hücrenin sayısını 0 yapar.
+    2. Komşu hücreleri bulur.
+    3. Komşu hücrelerin sayısını 1 artırır (eğer boşsa 1 yapar).
+    """
+
+    # 1. Patlayan hücrenin kendisini sıfırla
+    # (Bu hücrenin 'None' olmadığını ve 'count' == 4 olduğunu varsayıyoruz,
+    # çünkü bu fonksiyonu 'while' döngüsü çağırdı)
+    exploding_cell = game.board_state[row][col]
+    exploding_cell['count'] = 0
+    # Opsiyonel: Patlayan hücre sahipsiz kalabilir
+    # exploding_cell['owner'] = None
+
+    # 2. Geçerli komşuları al
+    # (get_valid_neighbors fonksiyonunun tanımlı olduğunu varsayıyoruz)
     valids = get_valid_neighbors(row, col)
+
+    # 3. Komşuları güncelle
     for r, c in valids:
+        # Komşu hücrenin mevcut durumunu al
         current_cell = game.board_state[r][c]
-        current_cell['count'] += 1
-        current_cell['owner'] = username
+
+        # --- ÖNCEKİ SORUNUN ÇÖZÜMÜ (None KONTROLÜ) ---
+        if current_cell is None:
+            # Hücre boşsa (NoneType), yeni hücre oluştur ve 1 yap
+            game.board_state[r][c] = {
+                'owner': username,
+                'count': 1
+            }
+        else:
+            # Hücre doluysa, 'count'u 1 artır ve sahibini güncelle
+            current_cell['count'] += 1
+            current_cell['owner'] = username
+
+    # Bu fonksiyon 'game' objesini doğrudan değiştirdi,
+    # bir şey döndürmesine gerek yok.
 class VoiceChatConsumer(AsyncJsonWebsocketConsumer):
 
     # DB'den VoiceChannel objesini çeker
