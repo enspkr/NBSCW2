@@ -1,0 +1,184 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8 col-md-10">
+        <h1 class="mb-4">{{ title }}</h1>
+        <p class="text-muted">Sesli iletişim için tercihlerinizi buradan yapın.</p>
+
+        <div class="card bg-secondary text-light mb-4">
+            <div class="card-header border-bottom border-dark">
+                Cihaz Tercihleri
+            </div>
+            <div class="card-body">
+
+                <div class="mb-3">
+                    <label for="audioInputSelect" class="form-label">Mikrofon Seçimi (Giriş)</label>
+                    <select id="audioInputSelect" class="form-select bg-dark text-light border-dark"></select>
+                </div>
+
+                <div class="mb-3">
+                    <label for="audioOutputSelect" class="form-label">Hoparlör Seçimi (Çıkış)</label>
+                    <select id="audioOutputSelect" class="form-select bg-dark text-light border-dark"></select>
+                </div>
+
+                <hr class="border-secondary">
+                <div class="mb-3">
+                    <label for="masterVolumeSelect" class="form-label">Ana Ses Seviyesi</label>
+                    <input type="range" class="form-range" id="masterVolumeSelect" min="0" max="1" step="0.01" value="1">
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Mikrofon Testi (Giriş Seviyesi)</label>
+                    <progress id="micTestMeter" class="w-100" max="100" value="0"></progress>
+                </div>
+
+                <button id="save-settings-btn" class="btn btn-success mt-3">Tercihleri Kaydet</button>
+                <div id="save-status" class="mt-2 text-success" style="display: none;">Ayarlarınız kaydedildi!</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const audioInputSelect = document.getElementById('audioInputSelect');
+    const audioOutputSelect = document.getElementById('audioOutputSelect');
+    const masterVolumeSelect = document.getElementById('masterVolumeSelect'); // Yeni
+    const micTestMeter = document.getElementById('micTestMeter'); // Yeni
+    const saveButton = document.getElementById('save-settings-btn');
+    const saveStatus = document.getElementById('save-status');
+
+    let localTestStream = null; // Mikrofon test akışı
+    let audioContext = null;
+    let analyserNode = null;
+    let volumeMeterLoop = null;
+
+    // 1. Kaydedilmiş Tercihleri Yükle
+    function loadSavedSettings() {
+        const savedInput = localStorage.getItem('preferredAudioInput');
+        const savedOutput = localStorage.getItem('preferredAudioOutput');
+        const savedMasterVolume = localStorage.getItem('masterVolume'); // Yeni
+
+        if (savedInput) audioInputSelect.value = savedInput;
+        if (savedOutput) audioOutputSelect.value = savedOutput;
+        if (savedMasterVolume) masterVolumeSelect.value = savedMasterVolume; // Yeni
+    }
+
+    // 2. Kullanıcının Cihazlarını Listele ve Testi Başlat
+    async function getDevices() {
+        try {
+            // Eğer varsa eski test akışını durdur
+            if (localTestStream) {
+                localTestStream.getTracks().forEach(track => track.stop());
+            }
+            if (volumeMeterLoop) {
+                cancelAnimationFrame(volumeMeterLoop);
+            }
+
+            // Seçili cihazı veya varsayılanı kullanarak akışı al
+            const selectedInputId = audioInputSelect.value || localStorage.getItem('preferredAudioInput');
+
+            localTestStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    deviceId: selectedInputId ? { exact: selectedInputId } : undefined
+                },
+                video: false
+            });
+
+            // Mikrofon Test (VU Metre) Mantığı
+            startMicTest(localTestStream);
+
+        } catch (e) {
+            console.error("Mikrofon izni alınamadı:", e);
+            alert("Lütfen mikrofon erişimine izin verin.");
+            return;
+        }
+
+        const devices = await navigator.mediaDevices.enumerateDevices();
+
+        audioInputSelect.innerHTML = '';
+        audioOutputSelect.innerHTML = '';
+
+        devices.forEach(device => {
+            const option = document.createElement('option');
+            option.value = device.deviceId;
+
+            if (device.kind === 'audioinput') {
+                option.text = device.label || `Mikrofon ${audioInputSelect.length + 1}`;
+                audioInputSelect.appendChild(option);
+            } else if (device.kind === 'audiooutput') {
+                option.text = device.label || `Hoparlör ${audioOutputSelect.length + 1}`;
+                audioOutputSelect.appendChild(option);
+            }
+        });
+
+        loadSavedSettings();
+    }
+
+    // 3. YENİ: Mikrofon Test (VU Metre) Mantığı
+    function startMicTest(stream) {
+        if (!audioContext) {
+            audioContext = new AudioContext();
+        }
+        analyserNode = audioContext.createAnalyser();
+        const source = audioContext.createMediaStreamSource(stream);
+        source.connect(analyserNode);
+
+        analyserNode.fftSize = 256;
+        const bufferLength = analyserNode.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+
+        function draw() {
+            volumeMeterLoop = requestAnimationFrame(draw);
+            analyserNode.getByteFrequencyData(dataArray);
+
+            let sum = 0;
+            for(let i = 0; i < bufferLength; i++) {
+                sum += dataArray[i];
+            }
+            let avg = sum / bufferLength;
+
+            // Progress bar'ı güncelle (0-100 arası)
+            micTestMeter.value = (avg / 1.28); // 128 max gibi davranır
+        }
+        draw();
+    }
+
+    // 4. Ayarları Kaydetme İşlevi
+    saveButton.addEventListener('click', () => {
+        const selectedInput = audioInputSelect.value;
+        const selectedOutput = audioOutputSelect.value;
+        const selectedMasterVolume = masterVolumeSelect.value; // Yeni
+
+        if (selectedInput) localStorage.setItem('preferredAudioInput', selectedInput);
+        if (selectedOutput) localStorage.setItem('preferredAudioOutput', selectedOutput);
+        if (selectedMasterVolume) localStorage.setItem('masterVolume', selectedMasterVolume); // Yeni
+
+        saveStatus.style.display = 'block';
+        setTimeout(() => { saveStatus.style.display = 'none'; }, 3000);
+    });
+
+    // Mikrofon seçimi değiştikçe testi yeniden başlat
+    audioInputSelect.addEventListener('change', getDevices);
+
+    // Sayfa yüklendiğinde cihazları getir
+    getDevices();
+
+    // Sayfadan ayrılırken test akışını durdur
+    window.addEventListener('beforeunload', () => {
+        if (localTestStream) {
+            localTestStream.getTracks().forEach(track => track.stop());
+        }
+        if (volumeMeterLoop) {
+            cancelAnimationFrame(volumeMeterLoop);
+        }
+        if (audioContext) {
+            audioContext.close();
+        }
+    });
+</script>
+{% endblock %}
