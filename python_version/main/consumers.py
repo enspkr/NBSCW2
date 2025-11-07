@@ -63,7 +63,7 @@ def find_critical_cells(board_state):
 
             # 1. Hücre dolu mu? (None değil mi?): 'if cell:'
             # 2. Doluysa 'count' değeri 4 mü?: 'cell['count'] == 4'
-            if cell and cell['count'] == 4:
+            if cell and cell.get('count') == 4:
                 # Eğer iki koşul da doğruysa, koordinatları listeye ekle
                 critical_cells.append((row, col))
 
