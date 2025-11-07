@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12 mb-4">
+        <h1><i class="bi bi-headset me-2"></i> {{ title }}</h1>
+        <p class="text-muted">Giriş yaptınız. Lütfen katılmak istediğiniz bir sesli sohbet odası seçin.</p>
+    </div>
+</div>
+
+<div class="row">
+    {% for channel in channels %}
+    <div class="col-lg-4 col-md-6 mb-4">
+        <div class="card text-white bg-secondary h-100 border-primary">
+            <div class="card-body">
+                <h5 class="card-title">{{ channel.name }}</h5>
+                {% if channel.is_private %}
+                    <span class="badge bg-danger">Özel</span>
+                {% else %}
+                    <span class="badge bg-success">Herkese Açık</span>
+                {% endif %}
+                <p class="card-text mt-2">Bu odaya katılarak diğer kullanıcılarla sesli iletişim kurabilirsiniz.</p>
+                <a href="{% url 'odasayfasi' slug=channel.slug %}" class="btn btn-primary w-100">
+                    Odaya Katıl
+                </a>
+            </div>
+        </div>
+    </div>
+    {% empty %}
+    <div class="col-12">
+        <div class="alert alert-warning">Henüz oluşturulmuş bir oda yok.</div>
+    </div>
+    {% endfor %}
+</div>
+
+{% endblock %}
