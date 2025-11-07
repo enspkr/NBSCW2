@@ -13,8 +13,68 @@ from django.contrib.auth import get_user_model
 from .models import VoiceChannel
 
 
+def get_valid_neighbors(row, col):
+    # Olası komşu hamleleri (Yukarı, Aşağı, Sol, Sağ)
+    # (n_row2, n_row, n_col2, n_col mantığınız)
+    potential_moves = [
+        (row - 1, col),  # Yukarı
+        (row + 1, col),  # Aşağı
+        (row, col - 1),  # Sol
+        (row, col + 1)  # Sağ
+    ]
 
+    valid_neighbors = []
 
+    for r, c in potential_moves:
+        # Ana kontrolümüz:
+        if 0 <= r < 5 and 0 <= c < 5:
+            # Sınırların içindeyse listeye ekle
+            valid_neighbors.append((r, c))
+        else:
+            # Sınır dışındaysa uyarı ver (isteğe bağlı)
+            print(f"-> Geçersiz komşu atlandı: ({r}, {c})")
+
+    return valid_neighbors
+def find_critical_cells(board_state):
+    """
+    Verilen 5x5'lik board_state'i tarar.
+    'count' değeri 4 olan hücrelerin (satır, sütun) koordinatlarını
+    bir liste içinde döndürür.
+
+    Args:
+        board_state (list[list[dict|None]]): Oyun tahtasının mevcut durumu.
+
+    Returns:
+        list[tuple(int, int)]: 'count' == 4 olan hücrelerin (row, col) listesi.
+    """
+
+    # 5x5'lik bir tahta olduğunu varsayıyoruz
+    ROWS = 5
+    COLS = 5
+
+    # 'count' değeri 4 olan hücrelerin koordinatlarını (r, c)
+    # depolayacağımız liste.
+    critical_cells = []
+
+    for row in range(ROWS):
+        for col in range(COLS):
+            # O anki hücreyi al
+            cell = board_state[row][col]
+
+            # 1. Hücre dolu mu? (None değil mi?): 'if cell:'
+            # 2. Doluysa 'count' değeri 4 mü?: 'cell['count'] == 4'
+            if cell and cell['count'] == 4:
+                # Eğer iki koşul da doğruysa, koordinatları listeye ekle
+                critical_cells.append((row, col))
+
+    # Listeyi döndür
+    return critical_cells
+def bum(game,row,col,username):
+    valids = get_valid_neighbors(row, col)
+    for r, c in valids:
+        current_cell = game.board_state[r][c]
+        current_cell['count'] += 1
+        current_cell['owner'] = username
 class VoiceChatConsumer(AsyncJsonWebsocketConsumer):
 
     # DB'den VoiceChannel objesini çeker
@@ -256,20 +316,23 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
             # (Buraya oyunun 'geçerli hamle mi?' kuralını eklemelisin)
             # Örneğin: hücre boş değilse ve sahibi siz değilseniz tıklayamazsınız
             cell = game.board_state[row][col]
-            if cell and cell['owner'] != self.user.username:
+            if not cell and cell['owner'] != self.user.username:
                 await self.send_error("Bu hücreye oynayamazsınız.")
                 return
 
-            # --- OYUN MANTIĞI ---
-            # (Burada senin anlattığın 'patlama' mantığını uygulayacaksın)
-            # Bu fonksiyon oyunun yeni state'ini, bir kazanan olup olmadığını
-            # ve sıranın kime geçtiğini hesaplamalı.
-            # Bu mantığı modelde bir metod olarak yazmak en temizidir.
-            # new_state, new_turn_user, winner = game.apply_move(self.user, row, col)
 
-            # --- Örnek Basit Hamle (Patlamasız) ---
-            # BU KISMI KENDİ OYUN MANTIĞINLA DEĞİŞTİR
-            game.board_state[row][col] = {'owner': self.user.username, 'count': cell['count'] + 1 if cell else 1}
+            count =  cell['count'] + 1
+            if count == 4:
+                    cell['count'] = 0
+                    bum(game,row,cell,self.user.username)
+
+            cells_to_explode = find_critical_cells(game.board_state)
+            while cells_to_explode:
+                r, c = cells_to_explode.pop(0)
+                bum(game,r,c,self.user.username)
+                cells_to_explode = find_critical_cells(game.board_state)
+
+            game.board_state[row][col] = {'owner': self.user.username }
             game.current_turn = game.player2 if self.user == game.player1 else game.player1
             # --- Örnek Bitti ---
 
