@@ -324,7 +324,7 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
             count =  cell['count'] + 1
             if count == 4:
                     cell['count'] = 0
-                    bum(game,row,cell,self.user.username)
+                    bum(game,row,col,self.user.username)
 
             cells_to_explode = find_critical_cells(game.board_state)
             while cells_to_explode:

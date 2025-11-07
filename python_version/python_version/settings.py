@@ -123,6 +123,7 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
+
 ASGI_APPLICATION = 'python_version.asgi.application' # <-- Proje adınızdaki asgi dosyasını işaret edin
 # Örn: Eğer projeniz 'nbsCW2' ise: ASGI_APPLICATION = 'nbsCW2.asgi.application'
 
