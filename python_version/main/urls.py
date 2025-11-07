@@ -15,4 +15,6 @@ urlpatterns = [
 
     # örn: http://site.com/game/room/UUID.../
     path('room/<uuid:game_id>/', views.game_room, name='game_room'),
+    path('join/<uuid:game_id>/', views.join_game, name='join_game'),
+    path('delete/<uuid:game_id>/', views.delete_game, name='delete_game'),
 ]
