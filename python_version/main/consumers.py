@@ -379,9 +379,13 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
 
             # --- GEÇERLİ HAMLE KONTROLÜ ---
             cell = game.board_state[row][col]
+            if not cell:
+                await self.send_error("Boş bir hücreye oynayamazsınız.")
+                return
             if cell and cell.get('owner') != self.user.username:
                 await self.send_error("Bu hücre rakibinize ait.")
                 return
+
 
             # --- İLK HAMLEYİ YAP ---
             current_cell = game.board_state[row][col]

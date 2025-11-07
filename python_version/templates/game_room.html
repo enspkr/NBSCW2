@@ -190,7 +190,13 @@
         );
 
         // Sunucudan Mesaj Alma
-        gameSocket.onmessage = function(e) {
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        // Sunucudan Mesaj Alma (GÜNCELLENDİ)
+        // 'async' yapıldı
+        gameSocket.onmessage = async function(e) {
             const data = JSON.parse(e.data);
             console.log("Sunucudan alındı:", data);
 
@@ -204,12 +210,10 @@
                 player2Username = data.p2 || "";
                 player2Name.textContent = data.p2 || "Rakip bekleniyor...";
 
-                // *** YENİ: Kazanan ve Oyun Bitti Kontrolü ***
                 if (data.status === 'finished') {
+                    // ... (Oyun bitti mantığı - aynı) ...
                     turnIndicator.textContent = "Oyun Bitti!";
                     logMessage("Kazanan: " + data.winner, 'success');
-
-                    // "Oyun Bitti" ekranını göster
                     winnerNameEl.textContent = data.winner;
                     gameOverOverlay.style.display = 'flex';
 
@@ -219,9 +223,20 @@
                     turnIndicator.textContent = "Sıra: " + data.turn;
                 }
 
-                // *** YENİ: Patlama Animasyonunu Tetikle ***
+                // *** YENİ: Sıralı Animasyon (await ile) ***
                 if (data.exploded_cells && data.exploded_cells.length > 0) {
-                    triggerExplosions(data.exploded_cells, data.state);
+                    // Tahtayı *kilitle* (animasyon bitene kadar tıklanmasın)
+                    boardElement.style.pointerEvents = 'none';
+
+                    // Patlamaları SIRAYLA tetikle ve bitmesini bekle
+                    await triggerSequentialExplosions(data.exploded_cells);
+
+                    // Animasyon bitti, tahtayı son haliyle çiz
+                    renderBoard(data.state);
+
+                    // Tahtanın *kilidini aç*
+                    boardElement.style.pointerEvents = 'auto';
+
                 } else {
                     // Patlama yoksa, tahtayı hemen çiz
                     renderBoard(data.state);
@@ -242,6 +257,33 @@
         gameSocket.onopen = function(e) {
             logMessage('Oyun masasına başarıyla bağlandınız.', 'success');
         };
+        async function triggerSequentialExplosions(explodedCells) {
+            // Her patlama arasındaki milisaniye (ms)
+            const EXPLOSION_DELAY = 200; // 200ms
+
+            // 'explodedCells' listesi Puthon'dan zaten sıralı geliyor (BFS)
+            for (const coords of explodedCells) {
+                const [r, c] = coords;
+                const cellEl = boardElement.querySelector(`.cell[data-row="${r}"][data-col="${c}"]`);
+
+                if (cellEl) {
+                    // 1. Patlama efektini ekle
+                    cellEl.classList.add('explode');
+
+                    // 2. Bir sonraki patlamaya geçmeden önce bekle
+                    await sleep(EXPLOSION_DELAY);
+
+                    // 3. (Opsiyonel) Efekti kaldır ki son 'renderBoard' temiz bulsun
+                    //    Gerçi 'renderBoard' tüm HTML'i yeniden yazıyor, buna gerek yok.
+                    //    CSS animasyonu (0.4s) bitmeden önce sıradaki başlayacak,
+                    //    bu da güzel bir zincirleme efekti verir.
+                }
+            }
+
+            // Tüm 'for' döngüsü bittikten sonra, son animasyonun da
+            // bitmesi için CSS'de tanımlı '0.4s' (400ms) kadar daha bekle.
+            await sleep(400);
+        }
 
         // *** GÜNCELLENMİŞ: Tahta Çizme (Zar İkonlarıyla) ***
         function renderBoard(boardState) {
