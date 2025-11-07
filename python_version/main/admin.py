@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import VoiceChannel, ChannelMember
+from .models import VoiceChannel, ChannelMember, GameSession
 from django.utils.text import slugify  # Slug oluşturmak için
 
 
@@ -49,3 +49,38 @@ class ChannelMemberAdmin(admin.ModelAdmin):
 
     # Kolay arama
     search_fields = ('user__username', 'channel__name')
+
+
+from django.contrib import admin
+from .models import GameSession  # .models, modelin aynı app'te olduğunu varsayar
+
+
+@admin.register(GameSession)
+class GameSessionAdmin(admin.ModelAdmin):
+    # Liste sayfasında hangi sütunların görüneceği
+    list_display = (
+        'game_id',
+        'player1',
+        'player2',
+        'status',
+        'current_turn',
+        'winner',
+        'created_at'
+    )
+
+    # Sağ tarafta hangi alanlara göre filtreleme yapılacağı
+    list_filter = ('status', 'created_at')
+
+    # Hangi alanlarda arama yapılacağı (Kullanıcı adı ile arama ekler)
+    search_fields = (
+        'game_id__icontains',
+        'player1__username__icontains',
+        'player2__username__icontains'
+    )
+
+    # Düzenleme sayfasında salt okunur (değiştirilemez) olacak alanlar
+    readonly_fields = ('game_id', 'created_at')
+
+    # board_state (JSONField) büyük olabileceği için
+    # liste görünümüne (list_display) eklemedim,
+    # ama detay sayfasında görünecektir.
