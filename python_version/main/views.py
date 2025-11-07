@@ -1,3 +1,7 @@
+import random
+
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 from django.contrib import messages
 from django.db import models, transaction
 from django.http import HttpResponse
@@ -73,52 +77,61 @@ def create_game(request):
 
     # Başlangıç tahtasını hazırla (ilk 3'leri yerleştir)
     initial_board = default_board()
-    initial_board[0][0] = {'owner': request.user.username, 'count': 3}
-    initial_board[4][4] = {'owner': None, 'count': 3}  # P2 katılınca güncellenecek
 
     game = GameSession.objects.create(
         player1=request.user,
-        current_turn=request.user,
+        current_turn=None,
         board_state=initial_board
     )
     return redirect('game_room', game_id=game.game_id)
 
 
 @login_required
-@transaction.atomic  # Race condition (iki kişinin aynı anda katılması) önlemi
+@transaction.atomic
 def join_game(request, game_id):
     """
-    İsteği yapan kullanıcıyı, Player 2 olarak bekleyen bir oyuna ekler.
-    (Tek katılma yöntemi budur)
+    İsteği yapan kullanıcıyı P2 olarak ekler, kimin başlayacağını seçer
+    ve P1'e WebSocket üzerinden haber verir.
+    (GÜNCELLENDİ: Random başlama ve P1'e haber verme eklendi)
     """
     game = get_object_or_404(GameSession.objects.select_for_update(), game_id=game_id)
 
-    if game.status != 'waiting':
-        messages.error(request, "Bu oyun çoktan başlamış.")
+    # ... (standart kontrolleriniz: status != 'waiting', player2 is not None, vb.) ...
+    if game.status != 'waiting' or game.player2 is not None or game.player1 == request.user:
+        messages.error(request, "Bu masaya katılamazsınız.")
         return redirect('game_lobby')
 
-    if game.player2 is not None:
-        messages.error(request, "Bu masa çoktan dolmuş.")
-        return redirect('game_lobby')
-
-    if game.player1 == request.user:
-        messages.error(request, "Kendi masanıza katılamazsınız.")
-        return redirect('game_lobby')
-
-    # --- 2. OYUNCU BAŞARIYLA KATILDI ---
+    # 1. P2'yi ata
     game.player2 = request.user
+
+    # 2. 50/50 Şansla kimin başlayacağını seç (İSTEK 3)
+    starter = random.choice([game.player1, game.player2])
+    game.current_turn = starter
     game.status = 'in_progress'
-    # (Opsiyonel) Sıra hala P1'de kalabilir veya P2'ye geçebilir, P1 kalsın:
-    game.current_turn = game.player1
-
-    # Başlangıç taşını P2'ye ata (create_game'de None idi)
-    game.board_state[4][4]['owner'] = request.user.username
-
     game.save()
 
-    # (Burada lobiye "bu masa doldu" diye bir WS mesajı atılabilir)
+    # 3. P1'e HABER VER (İSTEK 1)
+    # P1'in (ve şimdi P2'nin) bağlı olduğu gruba "oyun başladı" mesajı gönder
+    channel_layer = get_channel_layer()
+    game_group_name = f"game_{game_id}"
 
-    # Katılan oyuncuyu odaya yönlendir
+    async_to_sync(channel_layer.group_send)(
+        game_group_name,
+        {
+            'type': 'game_message',  # Consumer'daki 'game_message' handler'ını tetikler
+            'state': game.board_state,
+            'turn': game.current_turn.username,
+            'p1': game.player1.username,
+            'p2': game.player2.username,
+            'status': game.status,
+            'winner': None,
+            'message': f"{request.user.username} katıldı. Çark çevrildi ve {starter.username} başlıyor!",
+            'exploded_cells': [],
+            # JS'in çark animasyonunu tetiklemesi için özel event flag'i:
+            'special_event': 'game_start_roll'
+        }
+    )
+
     return redirect('game_room', game_id=game.game_id)
 
 

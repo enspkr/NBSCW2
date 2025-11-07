@@ -137,7 +137,15 @@ def check_for_winner(game, current_player_user):
     if opponent_pieces == 0:
         game.status = 'finished'
         game.winner = current_player_user
-
+def _count_player_pieces(board_state, username):
+        """Tahtadaki belirli bir oyuncuya ait taş sayısını döner."""
+        count = 0
+        for r in range(5):
+            for c in range(5):
+                cell = board_state[r][c]
+                if cell and cell.get('owner') == username:
+                    count += 1
+        return count
 class VoiceChatConsumer(AsyncJsonWebsocketConsumer):
 
     # DB'den VoiceChannel objesini çeker
@@ -352,10 +360,12 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
             self.channel_name
         )
 
-    async def receive_json(self, content,**kwargs):
+    async def receive_json(self, content, **kwargs):
         """
-        İstemciden (JS) bir mesaj aldığımızda (örn: hamle yapıldı).
-        (GÜNCELLENMİŞ VERSİYON - Animasyon ve Kazanan Kontrolü eklendi)
+        TÜM İSTEKLERİ BİRLEŞTİREN TAM SÜRÜM
+        - İlk hamle (boş kare) / Normal hamle (dolu kare) ayrımı
+        - Zincirleme reaksiyon
+        - Kazanan kontrolü
         """
         message_type = content.get('type')
         if not self.user.is_authenticated:
@@ -365,8 +375,8 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
         if message_type == 'make_move':
             row = content.get('row')
             col = content.get('col')
-
             game = await self.get_game(self.game_id)
+            player_username = self.user.username
 
             # --- GÜVENLİK KONTROLLERİ ---
             if game.status != 'in_progress':
@@ -377,60 +387,63 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
                 await self.send_error("Sıra sizde değil.")
                 return
 
-            # --- GEÇERLİ HAMLE KONTROLÜ ---
+            # --- YENİ: İLK HAMLE / NORMAL HAMLE KONTROLÜ ---
+            piece_count = _count_player_pieces(game.board_state, player_username)
             cell = game.board_state[row][col]
-            if not cell:
-                await self.send_error("Boş bir hücreye oynayamazsınız.")
-                return
-            if cell and cell.get('owner') != self.user.username:
-                await self.send_error("Bu hücre rakibinize ait.")
-                return
 
+            exploded_cells_list = []  # Patlama listesini başta tanımla
 
-            # --- İLK HAMLEYİ YAP ---
-            current_cell = game.board_state[row][col]
-            player_username = self.user.username
-
-            if current_cell is None:
+            if piece_count == 0:
+                # Bu, oyuncunun İLK HAMLESİ
+                if cell is not None:
+                    await self.send_error("İlk hamleniz boş bir hücreye olmalı.")
+                    return
+                # Hamle geçerli: Boş hücreye 1 taş koy
                 game.board_state[row][col] = {'owner': player_username, 'count': 1}
+                # İlk hamlede patlama veya kazanan olmaz
+
             else:
-                current_cell['count'] += 1
-                current_cell['owner'] = player_username
+                # Bu, normal bir HAMLE (ilk hamle değil)
+                if not cell:
+                    await self.send_error("Boş bir hücreye oynayamazsınız.")
+                    return
+                if cell.get('owner') != player_username:
+                    await self.send_error("Bu hücre rakibinize ait.")
+                    return
 
-            # --- ZİNCİRLEME REAKSİYON ---
+                # --- Normal Hamleyi Yap ---
+                cell['count'] += 1
+                cell['owner'] = player_username
 
-            # Animasyon için hangi hücrelerin patladığını takip et
-            exploded_cells_list = []
-
-            cells_to_explode = find_critical_cells(game.board_state)
-
-            while cells_to_explode:
-                r, c = cells_to_explode.pop(0)
-
-                # Bu hücrenin patladığını listeye ekle
-                if (r, c) not in exploded_cells_list:
-                    exploded_cells_list.append((r, c))
-
-                bum(game, r, c, player_username)
-
+                # --- Zincirleme Reaksiyon Başlat ---
                 cells_to_explode = find_critical_cells(game.board_state)
 
-            # --- KAZANAN KONTROLÜ ---
-            # Patlamalar bittikten sonra, bu hamle ile oyunu bitirdi mi?
-            check_for_winner(game, self.user)
+                while cells_to_explode:
+                    r, c = cells_to_explode.pop(0)
 
-            # --- OYUNU BİTİR ---
+                    if (r, c) not in exploded_cells_list:
+                        exploded_cells_list.append((r, c))
+
+                    # bum fonksiyonu komşuları günceller
+                    bum(game, r, c, player_username)
+
+                    # Tahtayı tekrar tara (yeni patlamalar için)
+                    cells_to_explode = find_critical_cells(game.board_state)
+
+                # --- KAZANAN KONTROLÜ (Sadece normal hamlede) ---
+                check_for_winner(game, self.user)
+
+            # --- OYUN SIRASINI DEĞİŞTİR ---
             if game.status != 'finished':
-                # Oyun bitmediyse sırayı değiştir
                 game.current_turn = game.player2 if self.user == game.player1 else game.player1
 
             await self.save_game(game)
 
-            # --- YAYINLA (Animasyon verisiyle birlikte) ---
+            # --- YAYINLA ---
             await self.broadcast_game_state(
                 game,
-                message=f"{self.user.username} hamle yaptı.",
-                exploded_cells=exploded_cells_list  # <-- JS'e animasyon için gönder
+                message=f"{player_username} hamle yaptı.",
+                exploded_cells=exploded_cells_list
             )
 
     # --- Yardımcı Metodlar ---
