@@ -349,7 +349,7 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
             # (Buraya oyunun 'geçerli hamle mi?' kuralını eklemelisin)
             # Örneğin: hücre boş değilse ve sahibi siz değilseniz tıklayamazsınız
             cell = game.board_state[row][col]
-            if not cell and cell['owner'] != self.user.username:
+            if not cell or cell['owner'] != self.user.username:
                 await self.send_error("Bu hücreye oynayamazsınız.")
                 return
 
