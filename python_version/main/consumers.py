@@ -352,7 +352,7 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
             self.channel_name
         )
 
-    async def receive_json(self, content):
+    async def receive_json(self, content,**kwargs):
         """
         İstemciden (JS) bir mesaj aldığımızda (örn: hamle yapıldı).
         (GÜNCELLENMİŞ VERSİYON - Animasyon ve Kazanan Kontrolü eklendi)
@@ -431,7 +431,7 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
 
     # --- Yardımcı Metodlar ---
 
-    async def broadcast_game_state(self, game, message=None):
+    async def broadcast_game_state(self, game, message=None, exploded_cells=None):  # <-- 1. BURAYA EKLENDİ
         """
         Odada bulunan herkese (tüm kanallara) oyunun son durumunu gönderir.
         """
@@ -446,16 +446,17 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
                 'status': game.status,
                 'winner': game.winner.username if game.winner else None,
                 'message': message,
+                'exploded_cells': exploded_cells if exploded_cells is not None else []  # <-- 2. BURAYA EKLENDİ
             }
         )
 
     async def game_message(self, event):
         """
-        'broadcast_game_state' tarafından grupta tetiklenen mesajı alır
-        ve WebSocket üzerinden istemciye gönderir.
+        Grup mesajını (event) alır ve istemciye (JS) WebSocket üzerinden gönderir.
         """
+        # Veriyi istemciye (JS) JSON olarak gönder
         await self.send_json({
-            'type': 'game_state',  # JS'in anlayacağı tip
+            'type': 'game_state',  # <-- JS'in anladığı 'type'
             'state': event['state'],
             'turn': event['turn'],
             'p1': event['p1'],
@@ -463,6 +464,7 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
             'status': event['status'],
             'winner': event['winner'],
             'message': event['message'],
+            'exploded_cells': event['exploded_cells']  # <-- 3. VERİ BURADAN JS'e GİDER
         })
 
     async def send_error(self, message):
