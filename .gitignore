@@ -58,7 +58,8 @@ social_empires/
 # Translations
 *.mo
 *.pot
-
+.vscode/
+staticfiles/
 # Django stuff:
 *.log
 local_settings.py
