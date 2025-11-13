@@ -335,8 +335,9 @@
     const chatSubmitMobile = document.getElementById('chat-input-mobile').querySelector('button');
 
     // --- 2. WEBSOCKET BAĞLANTISI ---
+    const protocol = window.location.protocol === "https:" ? "wss://" : "ws://";
     const voiceSocket = new WebSocket(
-        'ws://' + window.location.host + '/ws/voice/' + '?channel_slug=' + channelSlug
+        protocol + window.location.host + '/ws/voice/' + '?channel_slug=' + channelSlug
     );
 
     // --- 3. SİNYAL GÖNDERME FONKSİYONLARI ---
