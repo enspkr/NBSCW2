@@ -3,8 +3,10 @@
   <component name="NewModuleRootManager">
     <content url="file://$MODULE_DIR$">
       <excludeFolder url="file://$MODULE_DIR$/.venv" />
+      <excludeFolder url="file://$MODULE_DIR$/.venv2" />
+      <excludeFolder url="file://$MODULE_DIR$/python_version/.venv" />
     </content>
-    <orderEntry type="jdk" jdkName="Python 3.12 virtualenv at ~/PycharmProjects/NBSCW2/.venv" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="Python 3.12 virtualenv at ~/PycharmProjects/NBSCW2/python_version/.venv" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
 </module>
