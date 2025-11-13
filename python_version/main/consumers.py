@@ -1,3 +1,5 @@
+import logging
+
 from asgiref.sync import sync_to_async
 from django.contrib.auth import get_user_model
 from django.contrib.auth import get_user_model
@@ -11,7 +13,7 @@ from urllib.parse import parse_qs
 from channels.db import database_sync_to_async
 from django.contrib.auth import get_user_model
 from .models import VoiceChannel
-
+logger = logging.getLogger('main') # İstediğiniz bir isim verin
 
 def get_valid_neighbors(row, col):
     # Olası komşu hamleleri (Yukarı, Aşağı, Sol, Sağ)
@@ -146,6 +148,7 @@ def _count_player_pieces(board_state, username):
                 if cell and cell.get('owner') == username:
                     count += 1
         return count
+
 class VoiceChatConsumer(AsyncJsonWebsocketConsumer):
 
     # DB'den VoiceChannel objesini çeker
@@ -157,8 +160,10 @@ class VoiceChatConsumer(AsyncJsonWebsocketConsumer):
             return None
 
     async def connect(self):
-        # 1. Kimlik Doğrulama Kontrolü
+        logger.info(f"Yeni bağlantı denemesi. Kullanıcı Anonim mi? {self.scope['user'].is_anonymous}")
+
         if self.scope["user"].is_anonymous:
+            logger.warning("Kimlik doğrulanmamış kullanıcı reddedildi.")
             await self.close()
             return
 
