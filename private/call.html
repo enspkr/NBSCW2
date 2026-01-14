@@ -1,12 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Private Call 😉</title>
     <script src="/socket.io/socket.io.js"></script>
-    <head>
-    <head>
     <style>
         :root {
             --dark-bg: #121212;
@@ -15,41 +14,125 @@
             --red-accent: #d93025;
             --red-accent-hover: #a52714;
         }
-        body { background-color: var(--dark-bg); color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; height: 100vh; width: 100vw; overflow: hidden; }
-        .main-content { height: 100%; width: 100%; display: flex; }
-        
-        #video-grid { flex-grow: 1; display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 1rem; padding: 1rem; padding-bottom: 120px; box-sizing: border-box; transition: all 0.4s ease-in-out; }
-        #video-grid.pinned-mode { display: flex; flex-direction: column; gap: 0.5rem; }
-        
-        .video-container { position: relative; background-color: black; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; transition: all 0.4s ease-in-out; }
-        .video-container.pinned { flex-grow: 1; height: 85%; }
 
-        #unpinned-bar { width: 100%; height: 15%; display: flex; justify-content: center; align-items: center; gap: 0.5rem; padding-bottom: 5px; }
-        .video-container.unpinned { height: 100%; width: auto; aspect-ratio: 16 / 9; flex-shrink: 0; }
+        body {
+            background-color: var(--dark-bg);
+            color: #e0e0e0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            margin: 0;
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+        }
+
+        .main-content {
+            height: 100%;
+            width: 100%;
+            display: flex;
+        }
+
+        #video-grid {
+            flex-grow: 1;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 1rem;
+            padding: 1rem;
+            padding-bottom: 120px;
+            box-sizing: border-box;
+            transition: all 0.4s ease-in-out;
+        }
+
+        #video-grid.pinned-mode {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .video-container {
+            position: relative;
+            background-color: black;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.4s ease-in-out;
+        }
+
+        .video-container.pinned {
+            flex-grow: 1;
+            height: 85%;
+        }
+
+        #unpinned-bar {
+            width: 100%;
+            height: 15%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0.5rem;
+            padding-bottom: 5px;
+        }
+
+        .video-container.unpinned {
+            height: 100%;
+            width: auto;
+            aspect-ratio: 16 / 9;
+            flex-shrink: 0;
+        }
 
         /* --- THE DEFINITIVE FIX --- */
         /* By default, no videos are mirrored. */
-        video { 
-            width: 100%; 
-            height: 100%; 
-            object-fit: contain; 
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
         }
-        
+
         /* ONLY mirror the local video feed. */
         #local-video {
             transform: scaleX(-1);
         }
 
         /* When the local video is a screen share, UN-MIRROR it. */
-        #local-video.screen-share { 
-            transform: scaleX(1); 
+        #local-video.screen-share {
+            transform: scaleX(1);
         }
 
-        .username-overlay { position: absolute; bottom: 8px; left: 8px; background: rgba(0,0,0,0.6); padding: 5px 10px; border-radius: 6px; z-index: 10; }
-        
+        .username-overlay {
+            position: absolute;
+            bottom: 8px;
+            left: 8px;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 5px 10px;
+            border-radius: 6px;
+            z-index: 10;
+        }
 
-        .pin-btn { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; background-color: rgba(0,0,0,0.6); border: none; border-radius: 6px; cursor: pointer; z-index: 10; display: flex; align-items: center; justify-content: center; color: white; opacity: 0; transition: opacity 0.2s ease; }
-        .video-container:hover .pin-btn { opacity: 1; }
+
+        .pin-btn {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            width: 32px;
+            height: 32px;
+            background-color: rgba(0, 0, 0, 0.6);
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        .video-container:hover .pin-btn {
+            opacity: 1;
+        }
 
         .mute-indicator {
             position: absolute;
@@ -60,23 +143,65 @@
             background-color: rgba(217, 48, 37, 0.8);
             border-radius: 6px;
             z-index: 10;
-            display: none; /* Hidden by default */
+            display: none;
+            /* Hidden by default */
             align-items: center;
             justify-content: center;
             color: white;
         }
+
         .mute-indicator.visible {
-            display: flex; /* Shown when active */
+            display: flex;
+            /* Shown when active */
         }
 
-        #controls { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background-color: var(--secondary-surface); padding: 0.75rem; display: flex; gap: 0.75rem; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); z-index: 100; }
-        #controls button { padding: 0.75rem 1.5rem; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; background-color: #4a4a4a; color: white; transition: background-color 0.2s ease, transform 0.1s ease; white-space: nowrap; }
-        #controls button:hover { background-color: #5a5a5a; }
-        #controls button:active { transform: scale(0.95); }
-        #controls button.active { background-color: var(--red-accent); }
-        #hangup-btn { background-color: var(--red-accent); }
-        #hangup-btn:hover { background-color: var(--red-accent-hover); }
-                /* --- NEW: Container for client-side controls --- */
+        #controls {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: var(--secondary-surface);
+            padding: 0.75rem;
+            display: flex;
+            gap: 0.75rem;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+            z-index: 100;
+        }
+
+        #controls button {
+            padding: 0.75rem 1.5rem;
+            font-size: 1rem;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            background-color: #4a4a4a;
+            color: white;
+            transition: background-color 0.2s ease, transform 0.1s ease;
+            white-space: nowrap;
+        }
+
+        #controls button:hover {
+            background-color: #5a5a5a;
+        }
+
+        #controls button:active {
+            transform: scale(0.95);
+        }
+
+        #controls button.active {
+            background-color: var(--red-accent);
+        }
+
+        #hangup-btn {
+            background-color: var(--red-accent);
+        }
+
+        #hangup-btn:hover {
+            background-color: var(--red-accent-hover);
+        }
+
+        /* --- NEW: Container for client-side controls --- */
         .client-controls {
             position: absolute;
             bottom: 8px;
@@ -87,13 +212,15 @@
             transition: opacity 0.2s ease;
             z-index: 10;
         }
+
         .video-container:hover .client-controls {
             opacity: 1;
         }
+
         .client-controls button {
             width: 32px;
             height: 32px;
-            background-color: rgba(0,0,0,0.6);
+            background-color: rgba(0, 0, 0, 0.6);
             border: none;
             border-radius: 6px;
             cursor: pointer;
@@ -102,6 +229,7 @@
             justify-content: center;
             color: white;
         }
+
         /* --- NEW MODAL STYLES --- */
         .modal-overlay {
             position: fixed;
@@ -110,36 +238,52 @@
             width: 100%;
             height: 100%;
             background-color: rgba(0, 0, 0, 0.7);
-            display: none; /* Hidden by default */
+            display: none;
+            /* Hidden by default */
             align-items: center;
             justify-content: center;
             z-index: 200;
         }
+
         .modal-overlay.visible {
-            display: flex; /* Show when active */
+            display: flex;
+            /* Show when active */
         }
+
         .modal-content {
             background-color: var(--secondary-surface);
             padding: 2rem;
             border-radius: 12px;
             text-align: center;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
         }
+
         .modal-buttons {
             display: flex;
             gap: 1rem;
             margin-top: 1.5rem;
         }
+
         .modal-buttons button {
-             padding: 0.75rem 1.5rem; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; background-color: #4a4a4a; color: white;
+            padding: 0.75rem 1.5rem;
+            font-size: 1rem;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            background-color: #4a4a4a;
+            color: white;
         }
+
         #hd-quality-btn {
             background-color: var(--primary-accent);
         }
+
         /* --- NEW: Style for the speaking indicator --- */
         .video-container.is-speaking {
-            border: 3px solid #007acc; /* A bright blue glow */
+            border: 3px solid #007acc;
+            /* A bright blue glow */
         }
+
         /* --- NEW CHAT STYLES --- */
         #chat-container {
             position: fixed;
@@ -153,6 +297,7 @@
             border-left: 1px solid #444;
             z-index: 50;
         }
+
         #messages {
             list-style-type: none;
             margin: 0;
@@ -160,14 +305,17 @@
             flex-grow: 1;
             overflow-y: auto;
         }
+
         #messages li {
             padding: 0.5rem 0;
             border-bottom: 1px solid #333;
         }
+
         #chat-form {
             padding: 1rem;
             display: flex;
         }
+
         #chat-input {
             border: 1px solid #444;
             padding: 0.75rem;
@@ -177,11 +325,18 @@
             background-color: var(--secondary-surface);
             color: white;
         }
+
         #chat-form button {
-            background: var(--primary-accent); border: none; padding: 0.75rem 1rem; border-radius: 8px; color: white; cursor: pointer;
+            background: var(--primary-accent);
+            border: none;
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            color: white;
+            cursor: pointer;
         }
     </style>
 </head>
+
 <body>
     <main class="main-content">
         <div id="video-grid">
@@ -214,6 +369,25 @@
         let localStream, screenStream;
         let isScreenSharing = false;
 
+        // --- AUDIO MIXING GLOBALS ---
+        let audioContext;
+        let mixedAudioDest;
+        let micSource;
+        let screenAudioSource;
+        let mixedAudioStream;
+
+        function setupAudioMixing(micStream) {
+            audioContext = new AudioContext();
+            mixedAudioDest = audioContext.createMediaStreamDestination();
+
+            if (micStream.getAudioTracks().length > 0) {
+                micSource = audioContext.createMediaStreamSource(micStream);
+                micSource.connect(mixedAudioDest);
+            }
+
+            mixedAudioStream = mixedAudioDest.stream;
+        }
+
         function togglePin(containerToPin) {
             const isAlreadyPinned = containerToPin.classList.contains('pinned');
             videoGrid.classList.remove('pinned-mode');
@@ -225,7 +399,7 @@
             });
             const unpinnedBar = document.getElementById('unpinned-bar');
             if (unpinnedBar) unpinnedBar.remove();
-            
+
             if (!isAlreadyPinned) {
                 videoGrid.classList.add('pinned-mode');
                 const newUnpinnedBar = document.createElement('div');
@@ -241,7 +415,7 @@
                 videoGrid.appendChild(newUnpinnedBar);
             }
         }
-        
+
         function setMuteIndicator(container, isMuted) {
             let indicator = container.querySelector('.mute-indicator');
             if (!indicator) {
@@ -282,7 +456,7 @@
             const audioContext = new AudioContext();
             const analyser = audioContext.createAnalyser();
             analyser.fftSize = 256;
-            
+
             const source = audioContext.createMediaStreamSource(stream);
             source.connect(analyser);
 
@@ -291,7 +465,7 @@
             function checkVolume() {
                 analyser.getByteFrequencyData(dataArray);
                 const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
-                
+
                 // Use a threshold to detect speech
                 if (average > 15) { // You can adjust this threshold
                     container.classList.add('is-speaking');
@@ -310,6 +484,10 @@
                 localVideo.srcObject = localStream;
                 addPinButton(document.getElementById('local-video-container'));
 
+                // Initialize Audio Mixing with the Microphone stream
+                setupAudioMixing(localStream);
+
+                // Use the raw mic stream for the visualizer (still works)
                 setupLocalSpeakingIndicator(localStream);
 
                 // Step 2: Connect to the server.
@@ -333,7 +511,7 @@
                         if (usernameDiv && usernameDiv.textContent === userData.username && container.id !== 'local-video-container') {
                             console.warn(`Duplicate user found for ${userData.username}. Cleaning up old connection.`);
                             const oldSocketId = container.id;
-                            
+
                             // Clean up all old resources associated with the ghost user
                             if (peerConnections[oldSocketId]) {
                                 peerConnections[oldSocketId].close();
@@ -395,10 +573,10 @@
                         socket.emit('mute-status-changed', { isMuted });
                     }
                 });
-                
+
                 const cameraBtn = document.getElementById('camera-btn');
                 cameraBtn.addEventListener('click', () => { if (isScreenSharing) return; const videoTrack = localStream.getVideoTracks()[0]; if (videoTrack) { videoTrack.enabled = !videoTrack.enabled; cameraBtn.textContent = videoTrack.enabled ? 'Turn Camera Off' : 'Turn Camera On'; cameraBtn.classList.toggle('active', !videoTrack.enabled); } });
-                
+
                 document.getElementById('hangup-btn').addEventListener('click', () => { window.location.href = '/'; });
 
                 // --- NEW LOGIC FOR SCREEN SHARE MODAL ---
@@ -416,7 +594,7 @@
                         qualityModal.classList.add('visible');
                     }
                 });
-                
+
                 // Listeners for the buttons inside the modal.
                 standardQualityBtn.addEventListener('click', () => {
                     qualityModal.classList.remove('visible');
@@ -440,7 +618,7 @@
                 const chatForm = document.getElementById('chat-form');
                 const chatInput = document.getElementById('chat-input');
 
-                chatForm.addEventListener('submit', function(e) {
+                chatForm.addEventListener('submit', function (e) {
                     e.preventDefault();
                     if (chatInput.value) {
                         socket.emit('chat message', chatInput.value);
@@ -452,42 +630,73 @@
 
                 function addChatMessage({ username, message }) {
                     const item = document.createElement('li');
-                    
+
+                    // XSS FIX: Create a text node/element first to sanitize the input
+                    // We don't want to run replace() on raw HTML string if it contains scripts.
+                    const tempDiv = document.createElement('div');
+                    tempDiv.textContent = message;
+                    const sanitizedMessage = tempDiv.textContent;
+
                     // Regular expression to find URLs in the message text
                     const urlRegex = /(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])|(\bwww\.[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
 
                     // Replace found URLs with clickable <a> tags
-                    const processedMessage = message.replace(urlRegex, (url) => {
+                    // Since we are running this on the sanitized text, it is safe-ish, 
+                    // but we must be careful not to re-introduce HTML manually without encoding.
+                    // The safest way is to split by URL and append nodes.
+                    // For simplicity in this codebase, we will stick to innerHTML 
+                    // BUT ONLY with the sanitized base string where < > are already escaped? 
+                    // No, textContent doesn't escape for us if we read it back.
+                    // Actually, let's just use a safer approach:
+
+                    const messageContent = document.createElement('span');
+
+                    // Split text by URLs and append text nodes or anchor tags
+                    const parts = sanitizedMessage.split(urlRegex);
+                    // The split with capturing groups is tricky.
+                    // Let's use a simpler approach: Just textContent the username, then innerHTML the linked message
+                    // but we need to ESCAPE the message first.
+
+                    const escapeHtml = (unsafe) => {
+                        return unsafe
+                            .replace(/&/g, "&amp;")
+                            .replace(/</g, "&lt;")
+                            .replace(/>/g, "&gt;")
+                            .replace(/"/g, "&quot;")
+                            .replace(/'/g, "&#039;");
+                    };
+
+                    const safeMessage = escapeHtml(message);
+                    const processedMessage = safeMessage.replace(urlRegex, (url) => {
                         let href = url;
-                        // Ensure links starting with 'www' work correctly
                         if (!href.startsWith('http')) {
                             href = `http://${href}`;
                         }
                         return `<a href="${href}" target="_blank" rel="noopener noreferrer">${url}</a>`;
                     });
-                    
-                    item.innerHTML = `<strong>${username}:</strong> ${processedMessage}`;
+
+                    item.innerHTML = `<strong>${escapeHtml(username)}:</strong> ${processedMessage}`;
                     messages.appendChild(item);
                     messages.scrollTop = messages.scrollHeight;
                 }
 
-                socket.on('chat history', function(history) {
+                socket.on('chat history', function (history) {
                     history.forEach(msg => addChatMessage(msg));
                 });
 
-                socket.on('chat message', function(msg) {
+                socket.on('chat message', function (msg) {
                     addChatMessage(msg);
                 });
 
-            } catch (err) { 
-                console.error("Fatal Error:", err); 
+            } catch (err) {
+                console.error("Fatal Error:", err);
                 document.body.innerHTML = `<div style="text-align: center; padding-top: 50px;"><h1>Error</h1><p>Could not access camera/microphone. Please grant permission and refresh.</p></div>`;
             }
         }
         // Add these icon variables at the top of your script
         const speakerIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>`;
         const speakerOffIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5z"></path><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>`;
-       // This is the new function to add the separate mute buttons
+        // This is the new function to add the separate mute buttons
         function addClientMuteControls(videoContainer) {
             const controlsContainer = document.createElement('div');
             controlsContainer.className = 'client-controls';
@@ -522,20 +731,30 @@
             controlsContainer.appendChild(muteStreamBtn);
             videoContainer.appendChild(controlsContainer);
         }
-        function createPeerConnection(socketId, isInitiator, userData, socket) {
-            const pc = new RTCPeerConnection({
-                iceServers: [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'turn:global.turn.twilio.com:3478?transport=udp', username: '7b73723165731b74730b206a6a2a2b72', credential: 'password' }
-                ]
-            });
+        async function createPeerConnection(socketId, isInitiator, userData, socket) {
+            // Fetch ICE servers from our own backend to fix network issues
+            let iceServers = [{ urls: 'stun:stun.l.google.com:19302' }]; // Fallback
+            try {
+                const response = await fetch('/api/ice-config');
+                if (response.ok) {
+                    iceServers = await response.json();
+                }
+            } catch (e) {
+                console.error("Failed to fetch ICE config, using default STUN", e);
+            }
+
+            const pc = new RTCPeerConnection({ iceServers });
             peerConnections[socketId] = pc;
 
-            // --- Sending logic is correct and remains unchanged ---
-            const streamToSend = isScreenSharing ? screenStream : localStream;
-            streamToSend.getTracks().forEach(track => pc.addTrack(track, streamToSend));
-            if (isScreenSharing) {
-                localStream.getAudioTracks().forEach(track => pc.addTrack(track, localStream));
+            // --- Sending logic UPDATED for Audio Mixing ---
+            // 1. Add the VIDEO track (either Camera or Screen)
+            const videoStream = isScreenSharing ? screenStream : localStream;
+            videoStream.getVideoTracks().forEach(track => pc.addTrack(track, videoStream));
+
+            // 2. Add the MIXED AUDIO track (Always the same track!)
+            if (mixedAudioStream && mixedAudioStream.getAudioTracks().length > 0) {
+                const mixedTrack = mixedAudioStream.getAudioTracks()[0];
+                pc.addTrack(mixedTrack, mixedAudioStream);
             }
 
             pc.onicecandidate = (event) => { if (event.candidate) { socket.emit('webrtc-ice-candidate', socketId, event.candidate); } };
@@ -567,7 +786,7 @@
 
                 const videoEl = videoContainer.querySelector('video');
                 const audioEl = videoContainer.querySelector('.mic-audio');
-                
+
                 if (event.track.kind === 'video') {
                     // Always put video tracks in the video element.
                     videoEl.srcObject = new MediaStream([event.track]);
@@ -599,24 +818,42 @@
 
                     screenStream = await navigator.mediaDevices.getDisplayMedia(displayMediaOptions);
                     isScreenSharing = true;
+
+                    // Show screen on local video
                     localVideo.srcObject = screenStream;
                     localVideo.style.transform = 'scaleX(1)';
-                    
+
+                    // --- AUDIO MIXING LOGIC ---
+                    // If shared screen has audio, mix it into the destination
+                    if (screenStream.getAudioTracks().length > 0) {
+                        screenAudioSource = audioContext.createMediaStreamSource(screenStream);
+                        screenAudioSource.connect(mixedAudioDest);
+                    }
+
+                    // Replace ONLY the video track
                     await replaceTrack(screenStream.getVideoTracks()[0]);
-                    if (screenStream.getAudioTracks().length > 0) { await replaceTrack(screenStream.getAudioTracks()[0]); }
-                    
+
                     screenShareBtn.textContent = 'Stop Sharing';
                     screenShareBtn.classList.add('active');
+
+                    // Handle user clicking "Stop Sharing" on the browser UI
                     screenStream.getVideoTracks()[0].onended = () => { if (isScreenSharing) { toggleScreenShare(false, socket); } };
+
                 } catch (err) { console.error("Screen share error", err); isScreenSharing = false; }
             } else {
                 isScreenSharing = false;
                 localVideo.srcObject = localStream;
                 localVideo.style.transform = 'scaleX(-1)';
-                
+
+                // --- AUDIO CLEANUP LOGIC ---
+                if (screenAudioSource) {
+                    screenAudioSource.disconnect();
+                    screenAudioSource = null;
+                }
+
+                // Replace ONLY the video track back to camera
                 await replaceTrack(localStream.getVideoTracks()[0]);
-                await replaceTrack(localStream.getAudioTracks()[0]);
-                
+
                 screenStream.getTracks().forEach(track => track.stop());
                 screenShareBtn.textContent = 'Share Screen';
                 screenShareBtn.classList.remove('active');
@@ -633,7 +870,7 @@
                 }
             }
         }
-        
+
         main();
     </script>
 
@@ -648,4 +885,5 @@
     </div>
 
 </body>
+
 </html>

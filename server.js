@@ -83,6 +83,25 @@ app.post('/login', (req, res) => {
     });
 });
 
+app.get('/api/ice-config', protectRoute, (req, res) => {
+    // In production, you would generate a short-lived TURN token here (e.g. using Twilio API)
+    // For now, we return valid STUN servers and placeholders for TURN if configured.
+    const iceServers = [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:global.stun.twilio.com:3478' }
+    ];
+
+    if (process.env.TURN_URL && process.env.TURN_USERNAME && process.env.TURN_CREDENTIAL) {
+        iceServers.push({
+            urls: process.env.TURN_URL,
+            username: process.env.TURN_USERNAME,
+            credential: process.env.TURN_CREDENTIAL
+        });
+    }
+
+    res.json(iceServers);
+});
+
 app.get('/call', protectRoute, (req, res) => {
     res.sendFile(path.join(__dirname, 'private', 'call.html'));
 });
@@ -100,7 +119,7 @@ io.use((socket, next) => {
 const activeUsers = {};
 io.on('connection', (socket) => {
     console.log(`✅ User connected: ${socket.user.username} (${socket.id})`);
-    
+
     // Tell the new user about everyone who is already here, including their mute status
     socket.emit('existing-users', activeUsers);
 

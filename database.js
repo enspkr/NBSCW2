@@ -8,9 +8,9 @@ const DB_SOURCE = "synapse.db";
 // Connect to the database. The file will be created if it doesn't exist.
 const db = new sqlite3.Database(DB_SOURCE, (err) => {
     if (err) {
-      // Cannot open database
-      console.error(err.message);
-      throw err;
+        // Cannot open database
+        console.error(err.message);
+        throw err;
     } else {
         console.log('✅ Connected to the SQLite database.');
         // Create the users table
@@ -20,28 +20,28 @@ const db = new sqlite3.Database(DB_SOURCE, (err) => {
             password_hash TEXT, 
             CONSTRAINT username_unique UNIQUE (username)
             )`,
-        (err) => {
-            if (err) {
-                // Table already created
-                console.log('Users table already exists.');
-            } else {
-                // Table just created, creating the first user (you)
-                console.log('Users table created, now adding the admin user.');
-                const saltRounds = 10;
-                // IMPORTANT: Change this password to something secure!
-                const adminPassword = "changeThisPasswordNow"; 
+            (err) => {
+                if (err) {
+                    // Table already created
+                    console.log('Users table already exists.');
+                } else {
+                    // Table just created, creating the first user (you)
+                    console.log('Users table created, now adding the admin user.');
+                    const saltRounds = 10;
+                    // IMPORTANT: Change this password to something secure!
+                    const adminPassword = process.env.ADMIN_PASSWORD || "changeThisPasswordNow";
 
-                bcrypt.hash(adminPassword, saltRounds, (err, hash) => {
-                    if (err) {
-                        console.error("Error hashing password:", err);
-                        return;
-                    }
-                    const insert = 'INSERT INTO users (username, password_hash) VALUES (?,?)';
-                    db.run(insert, ['admin', hash]);
-                    console.log('🔑 Admin user created. Username: admin');
-                });
-            }
-        });  
+                    bcrypt.hash(adminPassword, saltRounds, (err, hash) => {
+                        if (err) {
+                            console.error("Error hashing password:", err);
+                            return;
+                        }
+                        const insert = 'INSERT INTO users (username, password_hash) VALUES (?,?)';
+                        db.run(insert, ['admin', hash]);
+                        console.log('🔑 Admin user created. Username: admin');
+                    });
+                }
+            });
     }
 });
 
