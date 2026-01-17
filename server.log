@@ -1,0 +1,15 @@
+
+> synapse-call@1.0.0 start
+> node server.js
+
+[dotenv@17.2.3] injecting env (4) from .env -- tip: 🔐 prevent committing .env to code: https://dotenvx.com/precommit
+🚀 Server is live and listening on http://localhost:3000
+✅ Connected to the SQLite database.
+✅ Connected to the chat database.
+Users table exists. Checking for schema updates...
+✅ User connected: enes (x49joH0nE1f9WYbwAAAB)
+❌ User disconnected: enes (x49joH0nE1f9WYbwAAAB)
+✅ User connected: enes (jxn5DNrgkz1UhfpUAAAD)
+❌ User disconnected: enes (jxn5DNrgkz1UhfpUAAAD)
+✅ User connected: enes (c9EQbyB_BPcKjj0CAAAF)
+✅ User connected: admin (0WRW6YAd-htlGT5fAAAH)
