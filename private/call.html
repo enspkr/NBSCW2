@@ -365,9 +365,31 @@
         const videoGrid = document.getElementById('video-grid');
         const localVideo = document.getElementById('local-video');
         const peerConnections = {};
-        const audioAnalyzers = {}; // NEW: To store audio analysis data
+        const audioAnalyzers = {};
+        const remoteGainNodes = {}; // NEW: Store gain nodes for mute control
         let localStream, screenStream;
         let isScreenSharing = false;
+
+        // --- Shared AudioContext to prevent limit errors and handle autoplay state ---
+        let sharedAudioContext = null;
+        function getSharedAudioContext() {
+            if (!sharedAudioContext) {
+                sharedAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (sharedAudioContext.state === 'suspended') {
+                sharedAudioContext.resume().catch(console.error);
+            }
+            return sharedAudioContext;
+        }
+
+        // Resume AudioContext on any user interaction
+        ['click', 'touchstart', 'keydown'].forEach(event => {
+            document.body.addEventListener(event, () => {
+                if (sharedAudioContext && sharedAudioContext.state === 'suspended') {
+                    sharedAudioContext.resume();
+                }
+            }, { once: true });
+        });
 
         // --- AUDIO MIXING GLOBALS ---
         let audioContext;
@@ -453,7 +475,7 @@
 
         function setupLocalSpeakingIndicator(stream) {
             const container = document.getElementById('local-video-container');
-            const audioContext = new AudioContext();
+            const audioContext = getSharedAudioContext();
             const analyser = audioContext.createAnalyser();
             analyser.fftSize = 256;
 
@@ -480,7 +502,12 @@
         async function main() {
             try {
                 // Step 1: Get camera and mic access first.
-                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                try {
+                    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                } catch (err) {
+                    console.warn("Could not get camera + audio, trying audio only.", err);
+                    localStream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
+                }
                 localVideo.srcObject = localStream;
                 addPinButton(document.getElementById('local-video-container'));
 
@@ -707,10 +734,15 @@
             muteVoiceBtn.title = 'Mute Voice';
             muteVoiceBtn.onclick = (e) => {
                 e.stopPropagation();
-                const audioEl = videoContainer.querySelector('.mic-audio');
-                if (audioEl) {
-                    audioEl.muted = !audioEl.muted;
-                    muteVoiceBtn.innerHTML = audioEl.muted ? speakerOffIcon : speakerIcon;
+                const socketId = videoContainer.id;
+                const gainNode = remoteGainNodes[socketId];
+                if (gainNode) {
+                    // Toggle gain between 0 (muted) and 1 (unmuted)
+                    const isMuted = gainNode.gain.value === 0;
+                    gainNode.gain.value = isMuted ? 1 : 0;
+                    muteVoiceBtn.innerHTML = isMuted ? speakerOffIcon : speakerIcon;
+                } else {
+                    muteVoiceBtn.innerHTML = speakerOffIcon;
                 }
             };
 
@@ -795,7 +827,46 @@
                     if (!audioEl.srcObject) {
                         const micStream = new MediaStream([event.track]);
                         audioEl.srcObject = micStream;
-                        setupSpeakingIndicator(videoContainer, micStream, socketId);
+
+                        // --- Robust Speaking Indicator & Muting via Web Audio ---
+                        const audioContext = getSharedAudioContext();
+                        // Workaround: Chrome need element muted + playing, but we route audio via API
+                        audioEl.muted = true;
+
+                        const source = audioContext.createMediaStreamSource(micStream);
+                        const gainNode = audioContext.createGain();
+                        const analyser = audioContext.createAnalyser();
+                        analyser.fftSize = 256;
+
+                        // Route: Source -> Gain -> Analyser -> Speakers
+                        source.connect(gainNode);
+                        gainNode.connect(analyser);
+                        analyser.connect(audioContext.destination);
+
+                        // Store GainNode
+                        remoteGainNodes[socketId] = gainNode;
+
+                        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+                        if (audioAnalyzers[socketId]) {
+                            cancelAnimationFrame(audioAnalyzers[socketId].loopId);
+                        }
+
+                        function checkVolume() {
+                            analyser.getByteFrequencyData(dataArray);
+                            const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+
+                            if (average > 15) {
+                                videoContainer.classList.add('is-speaking');
+                            } else {
+                                videoContainer.classList.remove('is-speaking');
+                            }
+                            if (audioAnalyzers[socketId]) {
+                                audioAnalyzers[socketId].loopId = requestAnimationFrame(checkVolume);
+                            }
+                        }
+                        audioAnalyzers[socketId] = { loopId: requestAnimationFrame(checkVolume) };
+                        // setupSpeakingIndicator(videoContainer, micStream, socketId); // Replaced by inline logic above
                     } else { // Otherwise, this must be the screen share audio.
                         // Add this audio track to the video element's stream.
                         if (videoEl.srcObject) {
