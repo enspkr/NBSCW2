@@ -12,6 +12,39 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+// --- LOG BUFFERING ---
+const serverLogs = [];
+const MAX_LOGS = 200;
+
+function bufferLog(type, args) {
+    const timestamp = new Date().toISOString();
+    // Convert args to string
+    const msg = args.map(arg => {
+        if (typeof arg === 'object') {
+            try { return JSON.stringify(arg); } catch (e) { return String(arg); }
+        }
+        return String(arg);
+    }).join(' ');
+
+    serverLogs.push({ timestamp, type, msg });
+    if (serverLogs.length > MAX_LOGS) serverLogs.shift();
+}
+
+// Hook into console
+const originalLog = console.log;
+const originalError = console.error;
+
+console.log = (...args) => {
+    originalLog.apply(console, args);
+    bufferLog('INFO', args);
+};
+
+console.error = (...args) => {
+    originalError.apply(console, args);
+    bufferLog('ERROR', args);
+};
+
+
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'a-default-secret-for-local-testing';
 
@@ -119,6 +152,18 @@ io.on('connection', (socket) => {
             io.emit('chat message', { username: 'System', message: 'Admin forced a refresh.' });
             return;
         }
+
+        if (message.trim() === '/logs') {
+            const role = activeUsers[socket.id]?.role || socket.user.role;
+            if (role !== 'admin' && role !== 'superuser') {
+                socket.emit('error-message', 'Unauthorized: Admin only.');
+                return;
+            }
+            socket.emit('server-logs', serverLogs);
+            socket.emit('chat message', { username: 'System', message: 'Fetching server logs...' });
+            return;
+        }
+
         // --- ROLL COMMAND ---
         if (message.startsWith('/roll')) {
             const parts = message.trim().split(/\s+/);

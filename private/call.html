@@ -5,6 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Private Call 😉</title>
+
+
     <script src="/socket.io/socket.io.js"></script>
     <style>
         :root {
@@ -595,18 +597,51 @@
         <div class="modal-content" style="max-width: 500px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                 <h2>My Local History</h2>
-                <label style="font-size:0.9em; color:#ccc;">
-                    Limit: <input type="number" id="history-limit-input" min="1" max="500"
-                        style="width:50px; padding:2px; background:#333; color:white; border:1px solid #555; text-align:center;">
-                </label>
+                <span id="history-close-btn" class="close-btn">&times;</span>
+            </div>
+            <div style="margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
+                <label>Limit: <input id="history-limit-input" type="number" style="width:60px;" min="-1" /></label>
+                <button id="history-clear-all-btn"
+                    style="background:#d32f2f; color:white; border:none; padding:5px 10px; cursor:pointer;">Clear
+                    All</button>
             </div>
             <ul id="history-list"
-                style="list-style: none; padding: 0; max-height: 400px; overflow-y: auto; text-align: left;"></ul>
-            <div class="modal-buttons">
-                <button id="history-clear-all-btn" style="background-color: #d93025;">Clear All</button>
-                <button id="history-close-btn">Close</button>
+                style="list-style:none; padding:0; max-height:300px; overflow-y:auto; border:1px solid #444;">
+            </ul>
+        </div>
+    </div>
+
+    <!-- LOGS MODAL -->
+    <div id="logs-modal" class="modal-overlay">
+        <div class="modal-content" style="max-width: 800px; height: 80vh; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <h3>Server Logs</h3>
+                <span id="logs-close-btn" class="close-btn">&times;</span>
+            </div>
+            <div class="modal-body" style="flex: 1; overflow: hidden; display: flex; flex-direction: column;">
+                <div style="margin-bottom: 10px;">
+                    <button id="logs-refresh-btn" style="padding: 5px 10px; cursor: pointer;">Refresh</button>
+                    <button id="logs-clear-local-btn"
+                        style="padding: 5px 10px; cursor: pointer; background: #e74c3c; color: white; border: none;">Clear
+                        View</button>
+                </div>
+                <div id="logs-container"
+                    style="flex: 1; overflow-y: auto; background: #000; color: #0f0; padding: 10px; font-family: monospace; font-size: 12px; white-space: pre-wrap;">
+                </div>
             </div>
         </div>
+    </div>
+    Limit: <input type="number" id="history-limit-input" min="1" max="500"
+        style="width:50px; padding:2px; background:#333; color:white; border:1px solid #555; text-align:center;">
+    </label>
+    </div>
+    <ul id="history-list" style="list-style: none; padding: 0; max-height: 400px; overflow-y: auto; text-align: left;">
+    </ul>
+    <div class="modal-buttons">
+        <button id="history-clear-all-btn" style="background-color: #d93025;">Clear All</button>
+        <button id="history-close-btn">Close</button>
+    </div>
+    </div>
     </div>
 
     <script>
@@ -864,10 +899,35 @@
                     socket.emit('get-all-users');
                 });
 
-                // Listen for forced refresh
                 socket.on('force-refresh', () => {
                     console.log("Admin forced refresh.");
                     window.location.reload();
+                });
+
+                // Listen for logs
+                socket.on('server-logs', (logs) => {
+                    const modal = document.getElementById('logs-modal');
+                    const container = document.getElementById('logs-container');
+                    const closeBtn = document.getElementById('logs-close-btn');
+                    const refreshBtn = document.getElementById('logs-refresh-btn');
+                    const clearBtn = document.getElementById('logs-clear-local-btn');
+
+                    container.innerHTML = logs.map(l => {
+                        const color = l.type === 'ERROR' ? 'red' : '#0f0';
+                        return `<div style="color:${color}"><span style="color:#666">[${l.timestamp}]</span> [${l.type}] ${window.escapeHtml(l.msg)}</div>`;
+                    }).join('');
+
+                    // Scroll to bottom
+                    container.scrollTop = container.scrollHeight;
+
+                    // Use flex to center, assuming .modal-overlay uses flex centering
+                    modal.style.display = 'flex';
+
+                    closeBtn.onclick = () => modal.style.display = 'none';
+                    window.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
+
+                    refreshBtn.onclick = () => { socket.emit('chat message', '/logs'); }; // Re-trigger
+                    clearBtn.onclick = () => { container.innerHTML = ''; };
                 });
 
                 socket.on('all-users-data', (data) => {
@@ -1167,6 +1227,7 @@
                     { cmd: '/roll', role: 'all' },
                     { cmd: '/admin', role: 'admin' },
                     { cmd: '/refresh', role: 'admin' },
+                    { cmd: '/logs', role: 'admin' },
                     { cmd: '/message', role: 'all' },
                     { cmd: '/make', role: 'superuser' },
                     { cmd: '/myhistory', role: 'all' }
