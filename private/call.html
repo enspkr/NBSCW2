@@ -304,7 +304,67 @@
             border-left: 1px solid #444;
             z-index: 50;
             transition: transform 0.3s ease-in-out;
+            transition: transform 0.3s ease-in-out;
             transform: translateX(0);
+        }
+
+        /* --- TABS CSS --- */
+        #chat-tabs {
+            display: flex;
+            background: #202124;
+            border-bottom: 1px solid #444;
+            padding: 5px 5px 0 5px;
+            overflow-x: auto;
+            flex-shrink: 0;
+            white-space: nowrap;
+        }
+
+        .chat-tab {
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-bottom: none;
+            color: #aaa;
+            padding: 5px 10px;
+            margin-right: 2px;
+            cursor: pointer;
+            border-radius: 4px 4px 0 0;
+            font-size: 0.9em;
+            position: relative;
+        }
+
+        .chat-tab:hover {
+            background: #333;
+            color: #eee;
+        }
+
+        .chat-tab.active {
+            background: #3c4043;
+            color: #fff;
+            border-color: #555;
+            font-weight: bold;
+        }
+
+        .chat-tab .close-tab {
+            margin-left: 5px;
+            font-size: 0.8em;
+            color: #888;
+            border-radius: 50%;
+            padding: 0 4px;
+        }
+
+        .chat-tab .close-tab:hover {
+            background: #d93025;
+            color: white;
+        }
+
+        .chat-tab.unread::after {
+            content: '•';
+            color: #d93025;
+            position: absolute;
+            top: 2px;
+            right: 4px;
+            font-size: 1.2em;
+            line-height: 0.5;
         }
 
         #chat-container.hidden {
@@ -435,17 +495,31 @@
         </div>
     </main>
 
-    <div id="chat-container">
+    <div id="chat-container" class="hidden">
         <div id="chat-header">
             <span>Chat</span>
-            <button id="close-chat-btn" title="Close Chat">&times;</button>
+            <button id="close-chat-btn">×</button>
         </div>
-        <div class="chat-tabs" id="chat-tabs">
-            <button class="chat-tab active" id="tab-chat">Chat</button>
-            <button class="chat-tab" id="tab-system">Local Chat</button>
+
+        <!-- TABS BAR -->
+        <div id="chat-tabs">
+            <button class="chat-tab active" data-tab="public" onclick="switchTab('public')">Public</button>
+            <button class="chat-tab" data-tab="system" id="tab-btn-system" style="display:none;"
+                onclick="switchTab('system')">Local</button>
         </div>
-        <div id="messages"></div>
-        <ul id="system-messages"></ul>
+
+        <!-- MESSAGES AREA -->
+        <div id="chat-messages-area"
+            style="flex:1; position:relative; overflow:hidden; display:flex; flex-direction:column;">
+            <!-- Public Container -->
+            <ul id="messages" class="message-list active"
+                style="flex:1; overflow-y:auto; padding:1rem; margin:0; list-style:none;"></ul>
+
+            <!-- System Container -->
+            <ul id="system-messages" class="message-list"
+                style="display:none; flex:1; overflow-y:auto; padding:1rem; margin:0; list-style:none;"></ul>
+        </div>
+
         <div id="command-suggestions"></div>
         <form id="chat-form">
             <input id="chat-input" autocomplete="off" placeholder="Type a message..." /><button id="send-btn"
@@ -747,8 +821,19 @@
                 // Step 2: Connect to the server.
                 const token = localStorage.getItem('synapse-token');
                 if (!token) { window.location.href = '/'; return; }
-                const socket = io({ auth: { token } });
+                const socket = io({
+                    auth: { token: token }
+                });
 
+                // Utils
+                window.escapeHtml = (unsafe) => {
+                    return unsafe
+                        .replace(/&/g, "&amp;")
+                        .replace(/</g, "&lt;")
+                        .replace(/>/g, "&gt;")
+                        .replace(/"/g, "&quot;")
+                        .replace(/'/g, "&#039;");
+                };
                 // Step 3: Set up all signaling listeners.
                 socket.on('my-identity', (data) => {
                     myRole = data.role;
@@ -758,13 +843,7 @@
 
                     // --- ADMIN/SUPERUSER: Show Tabs ---
                     if (data.role === 'admin' || data.role === 'superuser') {
-                        document.getElementById('chat-tabs').style.display = 'flex';
-                    } else {
-                        document.getElementById('chat-tabs').style.display = 'none';
-                    }
-
-                    // If admin or superuser, fetch all users
-                    if (myRole === 'admin' || myRole === 'superuser') {
+                        document.getElementById('tab-btn-system').style.display = 'inline-block';
 
                         // --- Error Message Handler ---
                         socket.on('error-message', (msg) => {
@@ -774,9 +853,21 @@
                         // --- Admin Action Success ---
                         socket.on('admin-action-success', (msg) => {
                             addChatMessage({ username: 'System', message: msg });
+                            // Refresh the user list to show updated roles/permissions
+                            socket.emit('get-all-users');
                         });
-                        socket.emit('get-all-users');
+                    } else {
+                        document.getElementById('tab-btn-system').style.display = 'none';
                     }
+
+                    // Fetch for everyone (used for suggestions)
+                    socket.emit('get-all-users');
+                });
+
+                // Listen for forced refresh
+                socket.on('force-refresh', () => {
+                    console.log("Admin forced refresh.");
+                    window.location.reload();
                 });
 
                 socket.on('all-users-data', (data) => {
@@ -972,8 +1063,8 @@
                 } catch (e) { }
 
                 function saveInputHistory() {
-                    // Limit to configured limit
-                    if (myMessageHistory.length > historyLimit) {
+                    // Limit to configured limit (unless -1 for infinite)
+                    if (historyLimit !== -1 && myMessageHistory.length > historyLimit) {
                         myMessageHistory = myMessageHistory.slice(myMessageHistory.length - historyLimit);
                     }
                     localStorage.setItem('chat_input_history', JSON.stringify(myMessageHistory));
@@ -989,7 +1080,10 @@
                     limitInput.value = historyLimit;
                     limitInput.onchange = () => {
                         let newLimit = parseInt(limitInput.value, 10);
-                        if (isNaN(newLimit) || newLimit < 1) newLimit = 50; // Fallback
+                        if (isNaN(newLimit)) newLimit = 50;
+                        // Allow -1 for infinite, otherwise enforce positive
+                        if (newLimit !== -1 && newLimit < 1) newLimit = 50;
+
                         historyLimit = newLimit;
                         localStorage.setItem('chat_input_history_limit', historyLimit);
                         // Re-trim and save immediately
@@ -1070,7 +1164,10 @@
                     { cmd: '/clearhistory', role: 'all' },
                     { cmd: '/clear', role: 'admin' },
                     { cmd: '/roll', role: 'all' },
+                    { cmd: '/roll', role: 'all' },
                     { cmd: '/admin', role: 'admin' },
+                    { cmd: '/refresh', role: 'admin' },
+                    { cmd: '/message', role: 'all' },
                     { cmd: '/make', role: 'superuser' },
                     { cmd: '/myhistory', role: 'all' }
                 ];
@@ -1106,7 +1203,8 @@
                             userMatches.forEach(u => {
                                 const div = document.createElement('div');
                                 div.className = 'suggestion-item';
-                                div.textContent = `/admin ${u.username}` + (u.isOnline ? '' : ' (offline)');
+                                const status = u.isOnline ? ' <span style="color:#4caf50; font-size:0.8em">● Online</span>' : ' <span style="color:#aaa; font-size:0.8em">○ Offline</span>';
+                                div.innerHTML = `/admin ${u.username}` + status;
                                 div.onclick = () => selectSuggestion(`/admin ${u.username}`);
                                 suggestionsContainer.appendChild(div);
                             });
@@ -1132,7 +1230,8 @@
                                 userMatches.forEach(u => {
                                     const div = document.createElement('div');
                                     div.className = 'suggestion-item';
-                                    div.textContent = `/make ${u.username}`; // Clean, no role info
+                                    const status = u.isOnline ? ' <span style="color:#4caf50; font-size:0.8em">● Online</span>' : ' <span style="color:#aaa; font-size:0.8em">○ Offline</span>';
+                                    div.innerHTML = `/make ${u.username}` + status;
                                     div.onclick = () => {
                                         chatInput.value = `/make ${u.username} `;
                                         chatInput.focus();
@@ -1174,6 +1273,48 @@
                         }
                     }
 
+                    // --- /message auto-complete ---
+                    if (query.startsWith('/message ')) {
+                        const afterCmd = query.substring(9); // remove "/message "
+                        const parts = afterCmd.split(' ');
+
+                        // Case 1: Typing Username
+                        if (parts.length === 1 && !afterCmd.endsWith(' ')) {
+                            const partialUser = parts[0].toLowerCase();
+
+                            // Filter: Name matches AND (if normal user, must be online)
+                            const userMatches = allUsers.filter(u => {
+                                if (!u.username.toLowerCase().startsWith(partialUser)) return false;
+                                if ((myRole !== 'admin' && myRole !== 'superuser') && !u.isOnline) return false;
+                                return true;
+                            });
+
+                            if (userMatches.length > 0) {
+                                suggestionsContainer.innerHTML = '';
+                                userMatches.forEach(u => {
+                                    const div = document.createElement('div');
+                                    div.className = 'suggestion-item';
+
+                                    const status = u.isOnline ? ' <span style="color:#4caf50; font-size:0.8em">● Online</span>' : ' <span style="color:#aaa; font-size:0.8em">○ Offline</span>';
+                                    div.innerHTML = `/message ${u.username}` + status;
+
+                                    div.onclick = () => {
+                                        const nextVal = `/message ${u.username} `;
+                                        chatInput.value = nextVal;
+                                        chatInput.focus();
+                                        // hide suggestions or show nothing?
+                                        suggestionsContainer.classList.remove('visible');
+                                        // Maybe trigger suggestions again?
+                                        showSuggestions(nextVal);
+                                    };
+                                    suggestionsContainer.appendChild(div);
+                                });
+                                suggestionsContainer.classList.add('visible');
+                                return;
+                            }
+                        }
+                    }
+
                     if (matches.length === 0) {
                         suggestionsContainer.classList.remove('visible');
                         return;
@@ -1194,6 +1335,8 @@
                     chatInput.value = cmd + ' ';
                     suggestionsContainer.classList.remove('visible');
                     chatInput.focus();
+                    // Trigger input event manually so suggestions update for the *next* part (e.g. username)
+                    showSuggestions(chatInput.value);
                 }
 
                 function updateSuggestionSelection(direction) {
@@ -1221,128 +1364,178 @@
 
                 chatForm.addEventListener('submit', function (e) {
                     e.preventDefault();
+                    console.log("Form submit triggered with value:", chatInput.value);
 
-                    // Aggressive cleanup
-                    suggestionsContainer.classList.remove('visible');
-                    suggestionsContainer.innerHTML = '';
-                    selectedSuggestionIndex = -1;
+                    try {
+                        // Aggressive cleanup
+                        suggestionsContainer.classList.remove('visible');
+                        suggestionsContainer.innerHTML = '';
+                        selectedSuggestionIndex = -1;
 
-                    if (chatInput.value) {
-                        const msg = chatInput.value;
+                        if (chatInput.value) {
+                            const msg = chatInput.value;
 
-                        // --- LOCAL COMMAND: Clear History ---
-                        if (msg.trim() === '/clearhistory') {
-                            myMessageHistory = []; // Clear array
-                            saveInputHistory();
-                            historyIndex = -1;
-                            addChatMessage({ username: 'System', message: 'Local typing history cleared.' });
-                            chatInput.value = '';
-                            return;
-                        }
-
-                        // --- LOCAL COMMAND: /myhistory ---
-                        if (msg.trim() === '/myhistory') {
-                            myMessageHistory.push({ text: msg, timestamp: Date.now() });
-                            saveInputHistory();
-                            historyIndex = -1;
-                            openHistoryModal();
-                            chatInput.value = '';
-                            return;
-                        }
-
-                        // --- ADMIN COMMAND: /admin [username] ---
-                        if (msg.startsWith('/admin')) {
-                            if (myRole !== 'admin' && myRole !== 'superuser') {
-                                addChatMessage({ username: 'System', message: 'Unauthorized: Admin only.' });
+                            // --- LOCAL COMMAND: Clear History ---
+                            if (msg.trim() === '/clearhistory') {
+                                myMessageHistory = []; // Clear array
+                                saveInputHistory();
+                                historyIndex = -1;
+                                addChatMessage({ username: 'System', message: 'Local typing history cleared.' });
                                 chatInput.value = '';
                                 return;
                             }
 
-                            const parts = msg.trim().split(' ');
-
-                            // Case 1: Just "/admin"
-                            if (parts.length === 1) {
+                            // --- LOCAL COMMAND: /myhistory ---
+                            if (msg.trim() === '/myhistory') {
                                 myMessageHistory.push({ text: msg, timestamp: Date.now() });
                                 saveInputHistory();
                                 historyIndex = -1;
-                                openUserListModal(socket);
+                                openHistoryModal();
                                 chatInput.value = '';
                                 return;
                             }
 
-                            // Case 2: "/admin [username]"
-                            const targetUsername = msg.substring(7).trim();
-                            if (!targetUsername) {
-                                // Fallback just in case split logic is weird
+                            // --- PRIVATE MESSAGE COMMAND: /message <user> [text] ---
+                            if (msg.startsWith('/message ')) {
+                                const parts = msg.trim().split(/\s+/);
+                                if (parts.length < 2) {
+                                    addChatMessage({ username: 'System', message: 'Usage: /message <username> [text]' });
+                                    chatInput.value = '';
+                                    return;
+                                }
+                                const targetUser = parts[1];
+
+                                // Always open tab
+                                createTab(targetUser, true);
+
+                                // If text provided, send it
+                                if (parts.length >= 3) {
+                                    const text = parts.slice(2).join(' ');
+                                    socket.emit('private message', { to: targetUser, message: text });
+                                }
+
+                                chatInput.value = '';
+                                return;
+                            }
+
+                            // --- ADMIN COMMAND: /admin [username] ---
+                            if (msg.startsWith('/admin')) {
+                                if (myRole !== 'admin' && myRole !== 'superuser') {
+                                    addChatMessage({ username: 'System', message: 'Unauthorized: Admin only.' });
+                                    chatInput.value = '';
+                                    return;
+                                }
+
+                                const parts = msg.trim().split(' ');
+
+                                // Case 1: Just "/admin"
+                                if (parts.length === 1) {
+                                    myMessageHistory.push({ text: msg, timestamp: Date.now() });
+                                    saveInputHistory();
+                                    historyIndex = -1;
+                                    openUserListModal(socket);
+                                    chatInput.value = '';
+                                    return;
+                                }
+
+                                // Case 2: "/admin [username]"
+                                const targetUsername = msg.substring(7).trim();
+                                if (!targetUsername) {
+                                    // Fallback just in case split logic is weird
+                                    myMessageHistory.push({ text: msg, timestamp: Date.now() });
+                                    saveInputHistory();
+                                    historyIndex = -1;
+                                    openUserListModal(socket);
+                                    chatInput.value = '';
+                                    return;
+                                }
+
                                 myMessageHistory.push({ text: msg, timestamp: Date.now() });
                                 saveInputHistory();
                                 historyIndex = -1;
-                                openUserListModal(socket);
+
+                                // Find in allUsers
+                                const userObj = allUsers.find(u => u.username === targetUsername);
+
+                                if (userObj) {
+                                    openAdminModal(userObj, socket); // Pass object, not socket ID
+                                    addChatMessage({ username: 'System', message: `Opened controls for ${targetUsername}` });
+                                } else {
+                                    addChatMessage({ username: 'System', message: `User "${targetUsername}" not found in database.` });
+                                }
+
                                 chatInput.value = '';
                                 return;
                             }
 
+                            // --- SUPERUSER COMMAND: /make [username] [role] ---
+                            if (msg.startsWith('/make ')) {
+                                if (myRole !== 'superuser') {
+                                    addChatMessage({ username: 'System', message: 'Unauthorized: Superuser only.' });
+                                    chatInput.value = '';
+                                    return;
+                                }
+
+                                const parts = msg.trim().split(' ');
+                                if (parts.length < 3) {
+                                    addChatMessage({ username: 'System', message: 'Usage: /make <username> <role> (admin|user)' });
+                                    chatInput.value = '';
+                                    return;
+                                }
+
+                                const targetUsername = parts[1];
+                                const newRole = parts[2];
+
+                                if (newRole !== 'admin' && newRole !== 'user') {
+                                    addChatMessage({ username: 'System', message: 'Invalid role. Use "admin" or "user".' });
+                                    chatInput.value = '';
+                                    return;
+                                }
+
+                                myMessageHistory.push({ text: msg, timestamp: Date.now() });
+                                saveInputHistory();
+                                historyIndex = -1;
+
+                                socket.emit('superuser-change-role', { targetUsername, newRole });
+                                addChatMessage({ username: 'System', message: `Requesting to make ${targetUsername} a ${newRole}...` });
+                                chatInput.value = '';
+                                return;
+                            }
+
+                            // --- IMPLICIT PRIVATE MESSAGE (If tab active) ---
+                            if (activeTab !== 'public' && activeTab !== 'system') {
+                                socket.emit('private message', { to: activeTab, message: msg });
+                                chatInput.value = '';
+                                // Add to history if unique or just always add? Terminal usually adds always
+                                // Only add if not empty (already checked)
+                                myMessageHistory.push({ text: msg, timestamp: Date.now() });
+                                saveInputHistory();
+                                historyIndex = -1; // Reset index on send
+                                return;
+                            }
+
+
+                            // --- LOCAL CHAT (System Tab) SCRATCHPAD ---
+                            if (activeTab === 'system') {
+                                addChatMessage({ username: 'Note', message: msg }); // Local only
+                                myMessageHistory.push({ text: msg, timestamp: Date.now() });
+                                saveInputHistory();
+                                chatInput.value = '';
+                                return;
+                            }
+
+                            // --- PUBLIC CHAT ---
+                            socket.emit('chat message', msg);
+
+                            // Add to history if unique or just always add? Terminal usually adds always
+                            // Only add if not empty (already checked)
                             myMessageHistory.push({ text: msg, timestamp: Date.now() });
                             saveInputHistory();
-                            historyIndex = -1;
-
-                            // Find in allUsers
-                            const userObj = allUsers.find(u => u.username === targetUsername);
-
-                            if (userObj) {
-                                openAdminModal(userObj, socket); // Pass object, not socket ID
-                                addChatMessage({ username: 'System', message: `Opened controls for ${targetUsername}` });
-                            } else {
-                                addChatMessage({ username: 'System', message: `User "${targetUsername}" not found in database.` });
-                            }
-
                             chatInput.value = '';
-                            return;
                         }
-
-                        // --- SUPERUSER COMMAND: /make [username] [role] ---
-                        if (msg.startsWith('/make ')) {
-                            if (myRole !== 'superuser') {
-                                addChatMessage({ username: 'System', message: 'Unauthorized: Superuser only.' });
-                                chatInput.value = '';
-                                return;
-                            }
-
-                            const parts = msg.trim().split(' ');
-                            if (parts.length < 3) {
-                                addChatMessage({ username: 'System', message: 'Usage: /make <username> <role> (admin|user)' });
-                                chatInput.value = '';
-                                return;
-                            }
-
-                            const targetUsername = parts[1];
-                            const newRole = parts[2];
-
-                            if (newRole !== 'admin' && newRole !== 'user') {
-                                addChatMessage({ username: 'System', message: 'Invalid role. Use "admin" or "user".' });
-                                chatInput.value = '';
-                                return;
-                            }
-
-                            myMessageHistory.push({ text: msg, timestamp: Date.now() });
-                            saveInputHistory();
-                            historyIndex = -1;
-
-                            socket.emit('superuser-change-role', { targetUsername, newRole });
-                            addChatMessage({ username: 'System', message: `Requesting to make ${targetUsername} a ${newRole}...` });
-                            chatInput.value = '';
-                            return;
-                        }
-
-                        socket.emit('chat message', msg);
-
-                        // Add to history if unique or just always add? Terminal usually adds always
-                        // Only add if not empty (already checked)
-                        myMessageHistory.push({ text: msg, timestamp: Date.now() });
-                        saveInputHistory();
-                        historyIndex = -1; // Reset index on send
-
-                        chatInput.value = '';
+                    } catch (err) {
+                        console.error("Error in chat submit:", err);
+                        addChatMessage({ username: 'System', message: 'Error processing command: ' + err.message });
                     }
                 });
 
@@ -1358,10 +1551,11 @@
                             updateSuggestionSelection('down');
                             return;
                         } else if (e.key === 'Enter' || e.key === 'Tab') {
+                            console.log("Keydown Enter/Tab. Index:", selectedSuggestionIndex);
                             if (selectedSuggestionIndex !== -1) {
                                 e.preventDefault();
                                 const items = suggestionsContainer.querySelectorAll('.suggestion-item');
-                                items[selectedSuggestionIndex].click();
+                                if (items[selectedSuggestionIndex]) items[selectedSuggestionIndex].click();
                             } else if (e.key === 'Tab') {
                                 // If tab pressed without selection, select first? Or just allow default tab? 
                                 // Let's select first match if tab is pressed
@@ -1411,7 +1605,7 @@
 
                 // In private/call.html
 
-                function addChatMessage({ username, message, timestamp }) {
+                function addChatMessage({ username, message, timestamp, recipient, isSelf }) {
                     const item = document.createElement('li');
 
                     // TIMESTAMP LOGIC
@@ -1448,14 +1642,8 @@
                     // Let's use a simpler approach: Just textContent the username, then innerHTML the linked message
                     // but we need to ESCAPE the message first.
 
-                    const escapeHtml = (unsafe) => {
-                        return unsafe
-                            .replace(/&/g, "&amp;")
-                            .replace(/</g, "&lt;")
-                            .replace(/>/g, "&gt;")
-                            .replace(/"/g, "&quot;")
-                            .replace(/'/g, "&#039;");
-                    };
+                    // escapeHtml is now global
+
 
                     const safeMessage = escapeHtml(message);
                     const processedMessage = safeMessage.replace(urlRegex, (url) => {
@@ -1466,25 +1654,70 @@
                         return `<a href="${href}" target="_blank" rel="noopener noreferrer">${url}</a>`;
                     });
 
-                    item.innerHTML = `<span style="font-size:0.75em; color:#888;">[${timeStr}]</span> <strong>${escapeHtml(username)}:</strong> ${processedMessage}`;
+                    // --- TABBED CHAT LOGIC ---
 
-                    // --- DATE SEPARATOR LOGIC ---
+                    let targetList = null;
+                    const isSystem = username === 'System';
+
+                    // 1. Determine Target Tab
+                    if (isSystem) {
+                        if (message.startsWith('Unauthorized') || message.startsWith('Usage') || message.startsWith('Invalid')) {
+                            // Command responses
+                            // If we are in public, show in public messages list (which is #messages)
+                            // If we are in system, show in system
+                            // If in private, show in that private tab?
+                            if (activeTab === 'public') targetList = document.getElementById('messages');
+                            else if (activeTab === 'system') targetList = document.getElementById('system-messages');
+                            else {
+                                // Private tab active
+                                const hiddenContainer = document.getElementById(`messages-${activeTab}`);
+                                targetList = hiddenContainer || document.getElementById('messages');
+                            }
+                        } else {
+                            // System Logs -> Local Tab (system-messages)
+                            targetList = document.getElementById('system-messages');
+                        }
+                    } else if (recipient) {
+                        // PRIVATE MESSAGE
+                        const otherUser = isSelf ? recipient : username;
+
+                        // Create tab if needed
+                        let tabBtn = document.querySelector(`.chat-tab[data-tab="${otherUser}"]`);
+                        if (!tabBtn) {
+                            createTab(otherUser);
+                        }
+
+                        // Get container
+                        let container = document.getElementById(`messages-${otherUser}`);
+                        if (!container) {
+                            createTab(otherUser);
+                            container = document.getElementById(`messages-${otherUser}`);
+                        }
+                        targetList = container;
+
+                        if (activeTab !== otherUser) {
+                            tabBtn = document.querySelector(`.chat-tab[data-tab="${otherUser}"]`);
+                            if (tabBtn) tabBtn.classList.add('unread');
+                        }
+
+                    } else {
+                        // PUBLIC MESSAGE
+                        targetList = document.getElementById('messages');
+
+                        if (activeTab !== 'public') {
+                            document.querySelector(`.chat-tab[data-tab="public"]`).classList.add('unread');
+                        }
+                    }
+
+                    // Fallback
+                    if (!targetList) targetList = document.getElementById('messages');
+
+
+                    // DATE SEPARATOR LOGIC (Scoped to target list)
                     const messageDate = timestamp ? new Date(timestamp) : new Date();
                     const dateStr = messageDate.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
-                    let targetList = null;
-                    let lastDateRef = null;
-                    const isSystem = username === 'System' && (myRole === 'admin' || myRole === 'superuser');
-
-                    if (isSystem) {
-                        targetList = document.getElementById('system-messages');
-                        lastDateRef = lastSystemDate;
-                    } else {
-                        targetList = messages; // global var
-                        lastDateRef = lastChatDate;
-                    }
-
-                    if (lastDateRef !== dateStr) {
+                    if (!targetList.lastDate || targetList.lastDate !== dateStr) {
                         const sep = document.createElement('div');
                         sep.style.textAlign = 'center';
                         sep.style.fontSize = '0.85em';
@@ -1492,45 +1725,137 @@
                         sep.style.margin = '10px 0';
                         sep.style.position = 'relative';
                         sep.innerHTML = `<span style="position:relative; z-index:1;">${dateStr}</span>`;
-                        // Optional line behind text?
-                        // sep.innerHTML += `<div style="position:absolute; left:0; top:50%; width:100%; height:1px; background:#444; z-index:0;"></div>`;
-
                         targetList.appendChild(sep);
-                        if (isSystem) lastSystemDate = dateStr;
-                        else lastChatDate = dateStr;
+                        targetList.lastDate = dateStr;
                     }
 
-                    // --- ROUTING LOGIC ---
-                    // If username is "System" AND we are admin/superuser, force it to Local Chat
-                    if (username === 'System' && (myRole === 'admin' || myRole === 'superuser')) {
-                        const sysList = document.getElementById('system-messages');
-                        sysList.appendChild(item);
-                        sysList.scrollTop = sysList.scrollHeight;
-                        // Optional: Badge logic if hidden?
-                    } else {
-                        messages.appendChild(item);
-                        messages.scrollTop = messages.scrollHeight;
-                    }
+                    item.innerHTML = `<span style="font-size:0.75em; color:#888;">[${timeStr}]</span> <strong>${escapeHtml(username)}:</strong> ${processedMessage}`;
+
+                    targetList.appendChild(item);
+                    targetList.scrollTop = targetList.scrollHeight;
                 }
 
-                let lastChatDate = null;
-                let lastSystemDate = null;
+                // --- TAB MANAGEMENT ---
+                let activeTab = 'public'; // 'public', 'system', or username
+
+                function switchTab(tabName) {
+                    activeTab = tabName;
+
+                    // Update Buttons
+                    document.querySelectorAll('.chat-tab').forEach(btn => {
+                        if (btn.dataset.tab === tabName) {
+                            btn.classList.add('active');
+                            btn.classList.remove('unread');
+                        } else {
+                            btn.classList.remove('active');
+                        }
+                    });
+
+                    // Update Containers
+                    // Hide all first
+                    document.querySelectorAll('.message-list').forEach(ul => ul.style.display = 'none');
+
+                    if (tabName === 'public') {
+                        document.getElementById('messages').style.display = 'block';
+                        document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+                    } else if (tabName === 'system') {
+                        document.getElementById('system-messages').style.display = 'block';
+                        document.getElementById('system-messages').scrollTop = document.getElementById('system-messages').scrollHeight;
+                    } else {
+                        // Private tab
+                        const container = document.getElementById(`messages-${tabName}`);
+                        if (container) {
+                            container.style.display = 'block';
+                            container.scrollTop = container.scrollHeight;
+                        }
+                    }
+
+                    chatInput.focus();
+                }
+                // Expose to window for HTML onclick handlers
+                window.switchTab = switchTab;
+
+
+                function createTab(username, switchToIt = false) {
+                    if (document.querySelector(`.chat-tab[data-tab="${username}"]`)) {
+                        if (switchToIt) switchTab(username);
+                        return; // Already exists
+                    }
+                    // ... rest of function ...
+
+
+                    const tabsContainer = document.getElementById('chat-tabs');
+                    const btn = document.createElement('button');
+                    btn.className = 'chat-tab';
+                    btn.dataset.tab = username;
+                    btn.innerHTML = `${escapeHtml(username)} <span class="close-tab" onclick="closeTab(event, '${username}')">×</span>`;
+                    btn.onclick = (e) => {
+                        if (e.target.classList.contains('close-tab')) return;
+                        switchTab(username);
+                    };
+                    tabsContainer.appendChild(btn);
+
+                    // Create Container
+                    const messagesArea = document.getElementById('chat-messages-area');
+                    const ul = document.createElement('ul');
+                    ul.id = `messages-${username}`;
+                    ul.className = 'message-list';
+                    ul.style.display = 'none';
+                    ul.style.flex = '1';
+                    ul.style.overflowY = 'auto';
+                    ul.style.padding = '1rem';
+                    ul.style.margin = '0';
+                    ul.style.listStyle = 'none';
+                    messagesArea.appendChild(ul);
+
+                    if (switchToIt) switchTab(username);
+                }
+
+                window.createTab = createTab;
+
+                function closeTab(e, username) {
+                    e.stopPropagation();
+                    const btn = document.querySelector(`.chat-tab[data-tab="${username}"]`);
+                    const container = document.getElementById(`messages-${username}`);
+
+                    if (btn) btn.remove();
+                    if (container) container.remove();
+
+                    if (activeTab === username) {
+                        switchTab('public');
+                    }
+                }
+                window.closeTab = closeTab;
+
 
                 socket.on('chat history', function (history) {
                     // Reset on full history load? Or just append?
                     // History is loaded once on connect.
-                    lastChatDate = null;
-                    history.forEach(msg => addChatMessage(msg));
+                    // Clear existing messages in public and system tabs before loading history
+                    document.getElementById('messages').innerHTML = '';
+                    document.getElementById('system-messages').innerHTML = '';
+                    document.getElementById('messages').lastDate = null;
+                    document.getElementById('system-messages').lastDate = null;
+
+                    history.forEach(msg => {
+                        // Compatibility shim if history item structure varies
+                        if (!msg.username) return;
+                        addChatMessage(msg);
+                    });
                 });
 
                 socket.on('chat message', function (msg) {
                     addChatMessage(msg);
                 });
 
+                socket.on('private message', function (msg) {
+                    addChatMessage(msg);
+                });
+
                 socket.on('chat cleared', function () {
                     const messages = document.getElementById('messages');
                     messages.innerHTML = '';
-                    lastChatDate = null; // Reset date tracking
+                    messages.lastDate = null; // Reset date tracking
                 });
 
             } catch (err) {

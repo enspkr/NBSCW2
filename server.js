@@ -35,10 +35,22 @@ const sqlite3 = require('sqlite3').verbose();
 // ...
 
 // Near your userDb connection
+// Near your userDb connection
 const chatDb = new sqlite3.Database('./chat.db', (err) => {
     if (err) console.error(err.message);
-    else console.log('✅ Connected to the chat database.');
-    chatDb.run(`CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY, username TEXT, message TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+    else {
+        console.log('✅ Connected to the chat database.');
+        chatDb.run(`CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY, username TEXT, message TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+
+        // --- ADD RECIPIENT COLUMN IF NOT EXISTS ---
+        chatDb.run(`ALTER TABLE messages ADD COLUMN recipient TEXT`, (err) => {
+            if (err && !err.message.includes('duplicate column')) {
+                console.error("Error adding recipient column:", err.message);
+            } else {
+                // console.log("Recipient column ensured.");
+            }
+        });
+    }
 });
 
 // ...
@@ -50,9 +62,24 @@ io.on('connection', (socket) => {
     // --- ADD THIS CHAT LOGIC ---
 
     // Send recent chat history to the newly connected user
-    chatDb.all("SELECT username, message FROM messages ORDER BY timestamp DESC LIMIT 50", [], (err, rows) => {
+    // MODIFIED: Fetch PUBLIC messages or PRIVATE messages for this user
+    // We want messages where recipient IS NULL OR recipient = myUsername OR (username = myUsername AND recipient IS NOT NULL)
+    const historySql = `
+        SELECT username, message, timestamp, recipient 
+        FROM messages 
+        WHERE recipient IS NULL 
+           OR recipient = ? 
+           OR (username = ? AND recipient IS NOT NULL)
+        ORDER BY timestamp DESC LIMIT 100
+    `;
+    chatDb.all(historySql, [socket.user.username, socket.user.username], (err, rows) => {
         if (err) return console.error(err.message);
-        socket.emit('chat history', rows.reverse());
+        // Identify which private messages are sent BY the user (isSelf=true)
+        const processedRows = rows.map(r => ({
+            ...r,
+            isSelf: (r.username === socket.user.username)
+        })).reverse();
+        socket.emit('chat history', processedRows);
     });
 
     // Listen for new chat messages from a client
@@ -72,7 +99,8 @@ io.on('connection', (socket) => {
                 socket.emit('error-message', 'Unauthorized: Admin only.');
                 return;
             }
-            chatDb.run("DELETE FROM messages", [], (err) => {
+            // MODIFIED: Only clear PUBLIC messages
+            chatDb.run("DELETE FROM messages WHERE recipient IS NULL", [], (err) => {
                 if (err) return console.error(err.message);
                 io.emit('chat cleared'); // Notify all clients
                 io.emit('chat message', { username: 'System', message: 'Chat history has been cleared.' });
@@ -80,8 +108,17 @@ io.on('connection', (socket) => {
             return; // Stop normal processing
         }
 
-        // --- PUBLIC COMMANDS ---
 
+        if (message.trim() === '/refresh') {
+            const role = activeUsers[socket.id]?.role || socket.user.role;
+            if (role !== 'admin' && role !== 'superuser') {
+                socket.emit('error-message', 'Unauthorized: Admin only.');
+                return;
+            }
+            io.emit('force-refresh'); // Notify all clients to reload
+            io.emit('chat message', { username: 'System', message: 'Admin forced a refresh.' });
+            return;
+        }
         // --- ROLL COMMAND ---
         if (message.startsWith('/roll')) {
             const parts = message.trim().split(/\s+/);
@@ -108,6 +145,41 @@ io.on('connection', (socket) => {
             if (err) return console.error(err.message);
             // Broadcast the message to everyone in the call
             io.emit('chat message', { username, message, timestamp: new Date().toISOString() });
+        });
+    });
+
+    // --- PRIVATE MESSAGE EVENT ---
+    socket.on('private message', ({ to, message }) => {
+        const from = socket.user.username;
+        const timestamp = new Date().toISOString();
+        console.log(`[Private Msg] From: ${from}, To: ${to}, Msg: ${message}`);
+
+        // Check Permissions
+        const userPermissions = activeUsers[socket.id]?.permissions;
+        if (userPermissions && !userPermissions.chat) {
+            console.log(`[Private Msg] Blocked by permissions: ${from}`);
+            return socket.emit('error-message', 'You are muted from chat.');
+        }
+
+        // Find Recipient Socket ID
+        const recipientSocketId = Object.keys(activeUsers).find(id => activeUsers[id].username === to);
+        console.log(`[Private Msg] Recipient Socket ID: ${recipientSocketId}`);
+
+        if (!recipientSocketId) {
+            console.log(`[Private Msg] User ${to} not found/offline.`);
+            return socket.emit('error-message', `User '${to}' is likely offline or not found.`);
+        }
+
+        // Save to DB
+        chatDb.run("INSERT INTO messages (username, message, recipient) VALUES (?, ?, ?)", [from, message, to], (err) => {
+            if (err) return console.error("Private msg DB error", err);
+            console.log(`[Private Msg] DB Insert Success`);
+
+            // Emit to Sender (so they see it in their tab) - mark as self!
+            socket.emit('private message', { username: from, message, timestamp, recipient: to, isSelf: true });
+
+            // Emit to Recipient
+            io.to(recipientSocketId).emit('private message', { username: from, message, timestamp, recipient: from, isSelf: false });
         });
     });
 });
@@ -349,11 +421,10 @@ io.on('connection', (socket) => {
         });
     });
 
-    // --- ADMIN: Get All Users ---
+    // --- ADMIN: Get All Users (Public Safe Version) ---
     socket.on('get-all-users', () => {
-        if (socket.user.role !== 'admin' && socket.user.role !== 'superuser') {
-            return socket.emit('error-message', 'Unauthorized: Admin only.');
-        }
+        // Allow everyone, but filter data based on role
+        const isAdmin = socket.user.role === 'admin' || socket.user.role === 'superuser';
 
         db.all("SELECT username, role, permissions FROM users", [], (err, rows) => {
             if (err) return console.error(err);
@@ -365,12 +436,21 @@ io.on('connection', (socket) => {
                 // Check if online
                 const isOnline = Object.values(activeUsers).some(u => u.username === row.username);
 
-                return {
-                    username: row.username,
-                    role: row.role || 'user',
-                    permissions,
-                    isOnline
-                };
+                if (isAdmin) {
+                    return {
+                        username: row.username,
+                        role: row.role || 'user',
+                        permissions,
+                        isOnline
+                    };
+                } else {
+                    // Public View: Only username and online status
+                    return {
+                        username: row.username,
+                        isOnline
+                        // role? maybe handy but not required
+                    };
+                }
             });
 
             socket.emit('all-users-data', usersList);
