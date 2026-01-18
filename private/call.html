@@ -65,6 +65,12 @@
             height: 85%;
         }
 
+        /* New Error Message Style */
+        .chat-message.system-error {
+            color: #ff4d4d;
+            font-weight: bold;
+        }
+
         #unpinned-bar {
             width: 100%;
             height: 15%;
@@ -384,6 +390,38 @@
         .user-list-group li:hover {
             background-color: var(--secondary-surface);
         }
+
+        /* --- TABS --- */
+        .chat-tabs {
+            display: none;
+            /* Hidden by default */
+            border-bottom: 1px solid #444;
+        }
+
+        .chat-tab {
+            flex: 1;
+            padding: 10px;
+            background: none;
+            border: none;
+            color: #aaa;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .chat-tab.active {
+            color: white;
+            border-bottom: 2px solid var(--primary-accent);
+        }
+
+        #system-messages {
+            display: none;
+            /* Hidden by default */
+            list-style-type: none;
+            margin: 0;
+            padding: 1rem;
+            flex-grow: 1;
+            overflow-y: auto;
+        }
     </style>
 </head>
 
@@ -402,7 +440,12 @@
             <span>Chat</span>
             <button id="close-chat-btn" title="Close Chat">&times;</button>
         </div>
+        <div class="chat-tabs" id="chat-tabs">
+            <button class="chat-tab active" id="tab-chat">Chat</button>
+            <button class="chat-tab" id="tab-system">Local Chat</button>
+        </div>
         <div id="messages"></div>
+        <ul id="system-messages"></ul>
         <div id="command-suggestions"></div>
         <form id="chat-form">
             <input id="chat-input" autocomplete="off" placeholder="Type a message..." /><button id="send-btn"
@@ -430,6 +473,15 @@
                 <label><input type="checkbox" id="perm-screen"> Allow Screen Share</label>
             </div>
             <br>
+            <br>
+            <div id="superuser-role-section"
+                style="display: none; margin-top: 10px; border-top: 1px solid #444; padding-top: 10px;">
+                <h3>Role (Superuser)</h3>
+                <select id="role-select" style="padding: 5px; color: black; background: white;">
+                    <option value="user">User</option>
+                    <option value="admin">Admin</option>
+                </select>
+            </div>
             <div id="superuser-password-section"
                 style="display: none; border-top: 1px solid #444; padding-top: 10px; margin-top: 10px;">
                 <h3>Change Password (Superuser)</h3>
@@ -460,6 +512,25 @@
             </div>
             <div class="modal-buttons">
                 <button id="admin-user-list-close-btn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MY HISTORY MODAL -->
+    <div id="history-modal" class="modal-overlay">
+        <div class="modal-content" style="max-width: 500px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <h2>My Local History</h2>
+                <label style="font-size:0.9em; color:#ccc;">
+                    Limit: <input type="number" id="history-limit-input" min="1" max="500"
+                        style="width:50px; padding:2px; background:#333; color:white; border:1px solid #555; text-align:center;">
+                </label>
+            </div>
+            <ul id="history-list"
+                style="list-style: none; padding: 0; max-height: 400px; overflow-y: auto; text-align: left;"></ul>
+            <div class="modal-buttons">
+                <button id="history-clear-all-btn" style="background-color: #d93025;">Clear All</button>
+                <button id="history-close-btn">Close</button>
             </div>
         </div>
     </div>
@@ -685,8 +756,25 @@
                     window.myUsername = data.username; // Capture username
                     enforcePermissions(myPermissions, socket);
 
+                    // --- ADMIN/SUPERUSER: Show Tabs ---
+                    if (data.role === 'admin' || data.role === 'superuser') {
+                        document.getElementById('chat-tabs').style.display = 'flex';
+                    } else {
+                        document.getElementById('chat-tabs').style.display = 'none';
+                    }
+
                     // If admin or superuser, fetch all users
                     if (myRole === 'admin' || myRole === 'superuser') {
+
+                        // --- Error Message Handler ---
+                        socket.on('error-message', (msg) => {
+                            addChatMessage({ username: 'System', message: 'Error: ' + msg });
+                        });
+
+                        // --- Admin Action Success ---
+                        socket.on('admin-action-success', (msg) => {
+                            addChatMessage({ username: 'System', message: msg });
+                        });
                         socket.emit('get-all-users');
                     }
                 });
@@ -863,7 +951,116 @@
                 const chatInput = document.getElementById('chat-input');
 
                 // --- CHAT HISTORY LOGIC ---
-                const myMessageHistory = [];
+                // --- CHAT HISTORY LOGIC ---
+                // Load from LocalStorage
+                let myMessageHistory = [];
+                try {
+                    const rawHistory = JSON.parse(localStorage.getItem('chat_input_history') || '[]');
+                    // Migration: Convert old strings to objects
+                    myMessageHistory = rawHistory.map(item => {
+                        if (typeof item === 'string') {
+                            return { text: item, timestamp: Date.now() };
+                        }
+                        return item;
+                    });
+                } catch (e) { console.error("History parse error", e); }
+
+                let historyLimit = 50;
+                try {
+                    const savedLimit = localStorage.getItem('chat_input_history_limit');
+                    if (savedLimit) historyLimit = parseInt(savedLimit, 10);
+                } catch (e) { }
+
+                function saveInputHistory() {
+                    // Limit to configured limit
+                    if (myMessageHistory.length > historyLimit) {
+                        myMessageHistory = myMessageHistory.slice(myMessageHistory.length - historyLimit);
+                    }
+                    localStorage.setItem('chat_input_history', JSON.stringify(myMessageHistory));
+                }
+
+                function openHistoryModal() {
+                    const modal = document.getElementById('history-modal');
+                    const list = document.getElementById('history-list');
+                    const closeBtn = document.getElementById('history-close-btn');
+                    const clearBtn = document.getElementById('history-clear-all-btn');
+                    const limitInput = document.getElementById('history-limit-input');
+
+                    limitInput.value = historyLimit;
+                    limitInput.onchange = () => {
+                        let newLimit = parseInt(limitInput.value, 10);
+                        if (isNaN(newLimit) || newLimit < 1) newLimit = 50; // Fallback
+                        historyLimit = newLimit;
+                        localStorage.setItem('chat_input_history_limit', historyLimit);
+                        // Re-trim and save immediately
+                        saveInputHistory();
+                        render();
+                    };
+
+                    function render() {
+                        list.innerHTML = '';
+                        if (myMessageHistory.length === 0) {
+                            list.innerHTML = '<li style="padding:10px; color:#888; text-align:center;">No history.</li>';
+                            return;
+                        }
+
+                        const reversedHistory = [...myMessageHistory]; // Actually, user wants last message at bottom -> Oldest First?
+                        // "Last message go to bottom" implies normal chronological order (oldest top, newest bottom).
+                        // Currently I was reversing it (newest top).
+                        // So I should just iterate myMessageHistory directly.
+
+                        myMessageHistory.forEach((item, index) => {
+                            const li = document.createElement('li');
+                            li.style.padding = '8px';
+                            li.style.borderBottom = '1px solid #444';
+                            li.style.display = 'flex';
+                            li.style.justifyContent = 'space-between';
+                            li.style.alignItems = 'center';
+
+                            const span = document.createElement('span');
+                            const timeStr = new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                            span.textContent = `[${timeStr}] ${item.text}`;
+                            span.style.wordBreak = 'break-all';
+                            span.style.marginRight = '10px';
+
+                            const delBtn = document.createElement('button');
+                            delBtn.textContent = '✖';
+                            delBtn.style.padding = '2px 6px';
+                            delBtn.style.background = 'none';
+                            delBtn.style.border = 'none';
+                            delBtn.style.color = '#d93025';
+                            delBtn.style.cursor = 'pointer';
+                            delBtn.style.fontSize = '1.2em';
+                            delBtn.onclick = () => {
+                                myMessageHistory.splice(index, 1);
+                                saveInputHistory();
+                                render();
+                            };
+
+                            li.appendChild(span);
+                            li.appendChild(delBtn);
+                            list.appendChild(li);
+                        });
+
+                        // Scroll to bottom
+                        setTimeout(() => list.scrollTop = list.scrollHeight, 0);
+                    }
+
+                    render();
+                    modal.classList.add('visible');
+
+                    closeBtn.onclick = () => modal.classList.remove('visible');
+                    clearBtn.onclick = () => {
+                        if (confirm("Clear all local history?")) {
+                            myMessageHistory = [];
+                            saveInputHistory();
+                            render();
+                        }
+                    };
+
+                    modal.onclick = (e) => { if (e.target === modal) modal.classList.remove('visible'); };
+                }
+
                 let historyIndex = -1;
                 let currentDraft = '';
 
@@ -873,7 +1070,9 @@
                     { cmd: '/clearhistory', role: 'all' },
                     { cmd: '/clear', role: 'admin' },
                     { cmd: '/roll', role: 'all' },
-                    { cmd: '/admin', role: 'admin' }
+                    { cmd: '/admin', role: 'admin' },
+                    { cmd: '/make', role: 'superuser' },
+                    { cmd: '/myhistory', role: 'all' }
                 ];
                 const suggestionsContainer = document.getElementById('command-suggestions');
                 let selectedSuggestionIndex = -1;
@@ -913,6 +1112,65 @@
                             });
                             suggestionsContainer.classList.add('visible');
                             return;
+                        }
+                    }
+
+                    // --- AUTOCOMPLETE FOR /make ---
+                    if (query.startsWith('/make ')) {
+                        const afterMake = query.substring(6);
+                        const parts = afterMake.split(' ');
+
+                        // Case 1: Typing Username (parts[0] is being typed, no second part yet)
+                        // Note: split(' ') on "foo" -> ["foo"]. on "foo " -> ["foo", ""]
+
+                        if (parts.length === 1 && !afterMake.endsWith(' ')) {
+                            const partialUser = parts[0].toLowerCase();
+                            const userMatches = allUsers.filter(u => u.username.toLowerCase().startsWith(partialUser));
+
+                            if (userMatches.length > 0) {
+                                suggestionsContainer.innerHTML = '';
+                                userMatches.forEach(u => {
+                                    const div = document.createElement('div');
+                                    div.className = 'suggestion-item';
+                                    div.textContent = `/make ${u.username}`; // Clean, no role info
+                                    div.onclick = () => {
+                                        chatInput.value = `/make ${u.username} `;
+                                        chatInput.focus();
+                                        showSuggestions(chatInput.value); // Trigger next step
+                                    };
+                                    suggestionsContainer.appendChild(div);
+                                });
+                                suggestionsContainer.classList.add('visible');
+                                return;
+                            }
+                        }
+
+                        // Case 2: Username completed (space exists), typing role
+                        if (parts.length >= 2 || (parts.length === 1 && afterMake.endsWith(' '))) {
+                            const targetName = parts[0];
+                            const partialRole = (parts[1] || '').toLowerCase();
+
+                            const targetUser = allUsers.find(u => u.username === targetName);
+                            if (targetUser) {
+                                suggestionsContainer.innerHTML = '';
+                                const currentRole = targetUser.role || 'user';
+
+                                ['admin', 'user'].forEach(role => {
+                                    if (role.startsWith(partialRole)) {
+                                        const div = document.createElement('div');
+                                        div.className = 'suggestion-item';
+                                        // Show role + context
+                                        div.innerHTML = `/make ${targetName} <strong>${role}</strong> <span style='color:#aaa; font-size:0.85em'> (Current: ${currentRole})</span>`;
+                                        div.onclick = () => selectSuggestion(`/make ${targetName} ${role}`);
+                                        suggestionsContainer.appendChild(div);
+                                    }
+                                });
+
+                                if (suggestionsContainer.children.length > 0) {
+                                    suggestionsContainer.classList.add('visible');
+                                    return;
+                                }
+                            }
                         }
                     }
 
@@ -974,9 +1232,20 @@
 
                         // --- LOCAL COMMAND: Clear History ---
                         if (msg.trim() === '/clearhistory') {
-                            myMessageHistory.length = 0; // Clear array
+                            myMessageHistory = []; // Clear array
+                            saveInputHistory();
                             historyIndex = -1;
                             addChatMessage({ username: 'System', message: 'Local typing history cleared.' });
+                            chatInput.value = '';
+                            return;
+                        }
+
+                        // --- LOCAL COMMAND: /myhistory ---
+                        if (msg.trim() === '/myhistory') {
+                            myMessageHistory.push({ text: msg, timestamp: Date.now() });
+                            saveInputHistory();
+                            historyIndex = -1;
+                            openHistoryModal();
                             chatInput.value = '';
                             return;
                         }
@@ -993,7 +1262,8 @@
 
                             // Case 1: Just "/admin"
                             if (parts.length === 1) {
-                                myMessageHistory.push(msg);
+                                myMessageHistory.push({ text: msg, timestamp: Date.now() });
+                                saveInputHistory();
                                 historyIndex = -1;
                                 openUserListModal(socket);
                                 chatInput.value = '';
@@ -1004,14 +1274,16 @@
                             const targetUsername = msg.substring(7).trim();
                             if (!targetUsername) {
                                 // Fallback just in case split logic is weird
-                                myMessageHistory.push(msg);
+                                myMessageHistory.push({ text: msg, timestamp: Date.now() });
+                                saveInputHistory();
                                 historyIndex = -1;
                                 openUserListModal(socket);
                                 chatInput.value = '';
                                 return;
                             }
 
-                            myMessageHistory.push(msg);
+                            myMessageHistory.push({ text: msg, timestamp: Date.now() });
+                            saveInputHistory();
                             historyIndex = -1;
 
                             // Find in allUsers
@@ -1028,11 +1300,46 @@
                             return;
                         }
 
+                        // --- SUPERUSER COMMAND: /make [username] [role] ---
+                        if (msg.startsWith('/make ')) {
+                            if (myRole !== 'superuser') {
+                                addChatMessage({ username: 'System', message: 'Unauthorized: Superuser only.' });
+                                chatInput.value = '';
+                                return;
+                            }
+
+                            const parts = msg.trim().split(' ');
+                            if (parts.length < 3) {
+                                addChatMessage({ username: 'System', message: 'Usage: /make <username> <role> (admin|user)' });
+                                chatInput.value = '';
+                                return;
+                            }
+
+                            const targetUsername = parts[1];
+                            const newRole = parts[2];
+
+                            if (newRole !== 'admin' && newRole !== 'user') {
+                                addChatMessage({ username: 'System', message: 'Invalid role. Use "admin" or "user".' });
+                                chatInput.value = '';
+                                return;
+                            }
+
+                            myMessageHistory.push({ text: msg, timestamp: Date.now() });
+                            saveInputHistory();
+                            historyIndex = -1;
+
+                            socket.emit('superuser-change-role', { targetUsername, newRole });
+                            addChatMessage({ username: 'System', message: `Requesting to make ${targetUsername} a ${newRole}...` });
+                            chatInput.value = '';
+                            return;
+                        }
+
                         socket.emit('chat message', msg);
 
                         // Add to history if unique or just always add? Terminal usually adds always
                         // Only add if not empty (already checked)
-                        myMessageHistory.push(msg);
+                        myMessageHistory.push({ text: msg, timestamp: Date.now() });
+                        saveInputHistory();
                         historyIndex = -1; // Reset index on send
 
                         chatInput.value = '';
@@ -1054,13 +1361,13 @@
                             if (selectedSuggestionIndex !== -1) {
                                 e.preventDefault();
                                 const items = suggestionsContainer.querySelectorAll('.suggestion-item');
-                                selectSuggestion(items[selectedSuggestionIndex].textContent);
+                                items[selectedSuggestionIndex].click();
                             } else if (e.key === 'Tab') {
                                 // If tab pressed without selection, select first? Or just allow default tab? 
                                 // Let's select first match if tab is pressed
                                 e.preventDefault();
                                 const items = suggestionsContainer.querySelectorAll('.suggestion-item');
-                                if (items.length > 0) selectSuggestion(items[0].textContent);
+                                if (items.length > 0) items[0].click();
                             }
                             return;
                         } else if (e.key === 'Escape') {
@@ -1081,7 +1388,9 @@
                             // Go back one more
                             historyIndex--;
                         }
-                        chatInput.value = myMessageHistory[historyIndex];
+
+                        const item = myMessageHistory[historyIndex];
+                        chatInput.value = (typeof item === 'object' && item.text) ? item.text : item;
 
                     } else if (e.key === 'ArrowDown') {
                         e.preventDefault();
@@ -1090,7 +1399,8 @@
                         if (historyIndex < myMessageHistory.length - 1) {
                             // Go forward one
                             historyIndex++;
-                            chatInput.value = myMessageHistory[historyIndex];
+                            const item = myMessageHistory[historyIndex];
+                            chatInput.value = (typeof item === 'object' && item.text) ? item.text : item;
                         } else {
                             // Back to present
                             historyIndex = -1;
@@ -1101,8 +1411,16 @@
 
                 // In private/call.html
 
-                function addChatMessage({ username, message }) {
+                function addChatMessage({ username, message, timestamp }) {
                     const item = document.createElement('li');
+
+                    // TIMESTAMP LOGIC
+                    let timeStr = '';
+                    if (timestamp) {
+                        timeStr = new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    } else {
+                        timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    }
 
                     // XSS FIX: Create a text node/element first to sanitize the input
                     // We don't want to run replace() on raw HTML string if it contains scripts.
@@ -1148,12 +1466,60 @@
                         return `<a href="${href}" target="_blank" rel="noopener noreferrer">${url}</a>`;
                     });
 
-                    item.innerHTML = `<strong>${escapeHtml(username)}:</strong> ${processedMessage}`;
-                    messages.appendChild(item);
-                    messages.scrollTop = messages.scrollHeight;
+                    item.innerHTML = `<span style="font-size:0.75em; color:#888;">[${timeStr}]</span> <strong>${escapeHtml(username)}:</strong> ${processedMessage}`;
+
+                    // --- DATE SEPARATOR LOGIC ---
+                    const messageDate = timestamp ? new Date(timestamp) : new Date();
+                    const dateStr = messageDate.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+                    let targetList = null;
+                    let lastDateRef = null;
+                    const isSystem = username === 'System' && (myRole === 'admin' || myRole === 'superuser');
+
+                    if (isSystem) {
+                        targetList = document.getElementById('system-messages');
+                        lastDateRef = lastSystemDate;
+                    } else {
+                        targetList = messages; // global var
+                        lastDateRef = lastChatDate;
+                    }
+
+                    if (lastDateRef !== dateStr) {
+                        const sep = document.createElement('div');
+                        sep.style.textAlign = 'center';
+                        sep.style.fontSize = '0.85em';
+                        sep.style.color = '#666';
+                        sep.style.margin = '10px 0';
+                        sep.style.position = 'relative';
+                        sep.innerHTML = `<span style="position:relative; z-index:1;">${dateStr}</span>`;
+                        // Optional line behind text?
+                        // sep.innerHTML += `<div style="position:absolute; left:0; top:50%; width:100%; height:1px; background:#444; z-index:0;"></div>`;
+
+                        targetList.appendChild(sep);
+                        if (isSystem) lastSystemDate = dateStr;
+                        else lastChatDate = dateStr;
+                    }
+
+                    // --- ROUTING LOGIC ---
+                    // If username is "System" AND we are admin/superuser, force it to Local Chat
+                    if (username === 'System' && (myRole === 'admin' || myRole === 'superuser')) {
+                        const sysList = document.getElementById('system-messages');
+                        sysList.appendChild(item);
+                        sysList.scrollTop = sysList.scrollHeight;
+                        // Optional: Badge logic if hidden?
+                    } else {
+                        messages.appendChild(item);
+                        messages.scrollTop = messages.scrollHeight;
+                    }
                 }
 
+                let lastChatDate = null;
+                let lastSystemDate = null;
+
                 socket.on('chat history', function (history) {
+                    // Reset on full history load? Or just append?
+                    // History is loaded once on connect.
+                    lastChatDate = null;
                     history.forEach(msg => addChatMessage(msg));
                 });
 
@@ -1164,6 +1530,7 @@
                 socket.on('chat cleared', function () {
                     const messages = document.getElementById('messages');
                     messages.innerHTML = '';
+                    lastChatDate = null; // Reset date tracking
                 });
 
             } catch (err) {
@@ -1296,47 +1663,44 @@
             pAudio.checked = perms.audio !== false;
             pScreen.checked = perms.screen !== false;
 
-            // CLIENT SAFEGUARD: Disable controls if managing self
-            // We need to fetch our own username. We have 'socket' but we might need to access the cached identity.
-            // Best way: check if targetUsername === myUsername (which we need to store globally or access via socket.id map if online)
+            // CLIENT SAFEGUARD: Logic for UI state
 
-            // We don't have a reliable global `myUsername` variable yet designated for this purpose, 
-            // but we can derive it from `remoteUsers[socket.id]`? No, remoteUsers only has *others*.
-            // Wait, standard practice: store own data in a variable. 
-            // `socket.on('my-identity', data => ...)` gives us role/perms.
-            // We need to store username too.
-            // Let's check where 'my-identity' is handled. It doesn't seem to pass username?
+            const isSelf = (user.username === window.myUsername);
+            const targetRole = user.role || 'user'; // We need to make sure we have role. 'allUsers' has it. 'remoteUsers' needs it.
 
-            // Actually, for now, let's rely on server rejection as primary. 
-            // But to be UX friendly, let's try to match logic. 
+            // Reset Disabled State first
+            [pChat, pVideo, pAudio, pScreen].forEach(el => el.disabled = false);
+            title.innerText = `Manage ${user.username}` + (user.isOnline === false ? ' (Offline)' : '');
 
-            // Wait, we can get username from `local-video-container .username-overlay`. 
-            // Just assume 'You' is displayed? No.
-
-            // Let's disable inputs if socketId matches `socket.id`.
-            // BUT `socket.id` is not always available in scope easily unless we use the global `socket` object if available?
-            // `socket` is passed to this function.
-
-            const isSelf = (user.username === window.myUsername); // We need to add window.myUsername or similar.
-
-            // Let's assume we can add `myUsername` global.
+            // 1. SELF MANAGEMENT
             if (isSelf) {
-                [pChat, pVideo, pAudio, pScreen].forEach(el => el.disabled = true);
                 title.innerText += " (You)";
-            } else {
-                [pChat, pVideo, pAudio, pScreen].forEach(el => el.disabled = false);
+                // Allow Video/Audio/Screen.
+                // EXPLICITLY DISABLE CHAT to prevent lockout.
+                pChat.disabled = true;
+                pChat.parentElement.title = "You cannot disable your own chat.";
+            }
+
+            // 2. ADMIN managing SUPERUSER
+            if (myRole === 'admin' && targetRole === 'superuser') {
+                // Admin can manage Video/Audio/Screen of Superuser
+                // BUT CANNOT Disable Chat
+                pChat.disabled = true;
+                pChat.parentElement.title = "Admins cannot disable chat for Superusers.";
+            }
+
+            // 3. ADMIN managing ADMIN (Same rule applies based on server logic? "Privileged users")
+            // Server said: "Admins cannot disable chat for other privileged users (role=admin or role=superuser)"
+            // So let's match that.
+            if (myRole === 'admin' && targetRole === 'admin' && !isSelf) {
+                pChat.disabled = true;
+                pChat.parentElement.title = "Admins cannot disable chat for other Admins.";
             }
 
             // Update Handler
-            // We need to remove old listeners to avoid closure hell or multiple events? 
-            // Simplest way: just re-assign onclick.
-
             function updatePerm(feature, value) {
-                // Optimistic update
-                if (!user.permissions) user.permissions = {};
-                user.permissions[feature] = value;
-
-                // Send USERNAME, not Socket ID
+                // Optimistic UI update? Or wait? 
+                // Let's just emit.
                 socket.emit('admin-update-permission', { targetUsername: user.username, feature, value });
             }
 
@@ -1344,6 +1708,32 @@
             pVideo.onclick = () => updatePerm('video', pVideo.checked);
             pAudio.onclick = () => updatePerm('audio', pAudio.checked);
             pScreen.onclick = () => updatePerm('screen', pScreen.checked);
+
+            // --- SUPERUSER: Change Role Section ---
+            const roleSection = document.getElementById('superuser-role-section');
+            if (myRole === 'superuser') {
+                roleSection.style.display = 'block';
+                const roleSelect = document.getElementById('role-select');
+
+                // Set current role value logic
+                // If it's superuser, maybe show it but disable it? Or just default to admin?
+                // The dropdown only has Admin/User.
+                if (user.role === 'superuser') {
+                    // If target is superuser, maybe don't allow demoting via this simple dropdown easily?
+                    // Or just set value to something?
+                    // Let's just handle admin/user for now.
+                    roleSelect.value = 'admin'; // Fallback
+                } else {
+                    roleSelect.value = (user.role === 'admin') ? 'admin' : 'user';
+                }
+
+                roleSelect.onchange = () => {
+                    const newRole = roleSelect.value;
+                    socket.emit('superuser-change-role', { targetUsername: user.username, newRole });
+                };
+            } else {
+                roleSection.style.display = 'none';
+            }
 
             // --- SUPERUSER: Change Password Section ---
             const passwordSection = document.getElementById('superuser-password-section');
@@ -1557,6 +1947,28 @@
         }
 
         main();
+
+        // --- TAB SWITCHING LOGIC ---
+        const tabChat = document.getElementById('tab-chat');
+        const tabSystem = document.getElementById('tab-system');
+        const listChat = document.getElementById('messages');
+        const listSystem = document.getElementById('system-messages');
+
+        tabChat.onclick = () => {
+            tabChat.classList.add('active');
+            tabSystem.classList.remove('active');
+            listChat.style.display = 'block';
+            listSystem.style.display = 'none';
+        };
+
+        tabSystem.onclick = () => {
+            tabSystem.classList.add('active');
+            tabChat.classList.remove('active');
+            listChat.style.display = 'none';
+            listSystem.style.display = 'block';
+        };
+
+
     </script>
 
     <div id="quality-modal" class="modal-overlay">

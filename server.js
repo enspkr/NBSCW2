@@ -67,7 +67,8 @@ io.on('connection', (socket) => {
 
         // --- ADMIN COMMANDS ---
         if (message.trim() === '/clear') {
-            if (socket.user.role !== 'admin') {
+            const role = activeUsers[socket.id]?.role || socket.user.role;
+            if (role !== 'admin' && role !== 'superuser') {
                 socket.emit('error-message', 'Unauthorized: Admin only.');
                 return;
             }
@@ -98,7 +99,7 @@ io.on('connection', (socket) => {
 
             chatDb.run("INSERT INTO messages (username, message) VALUES (?, ?)", [username, rollMessage], (err) => {
                 if (err) return console.error(err.message);
-                io.emit('chat message', { username, message: rollMessage });
+                io.emit('chat message', { username, message: rollMessage, timestamp: new Date().toISOString() });
             });
             return; // Stop normal processing
         }
@@ -106,7 +107,7 @@ io.on('connection', (socket) => {
         chatDb.run("INSERT INTO messages (username, message) VALUES (?, ?)", [username, message], (err) => {
             if (err) return console.error(err.message);
             // Broadcast the message to everyone in the call
-            io.emit('chat message', { username, message });
+            io.emit('chat message', { username, message, timestamp: new Date().toISOString() });
         });
     });
 });
@@ -190,6 +191,19 @@ io.on('connection', (socket) => {
 
         // Tell the user their own permissions/role immediately
         socket.emit('my-identity', { role, permissions, username: socket.user.username });
+
+        // --- Fetch Chat History (Last 50) ---
+        // We order by timestamp DESC to get the latest, then reverse it for display
+        const historySql = "SELECT username, message, timestamp FROM messages ORDER BY timestamp DESC LIMIT 50";
+        chatDb.all(historySql, [], (err, rows) => {
+            if (err) {
+                console.error("Error fetching chat history:", err);
+            } else {
+                // The query gives us newest first (DESC). We need oldest first for chat flow.
+                const orderedRows = rows.reverse();
+                socket.emit('chat history', orderedRows);
+            }
+        });
     });
 
     // Add a new listener for mute status changes
@@ -209,8 +223,13 @@ io.on('connection', (socket) => {
         }
 
         // 1.5 Prevent Self-Lockout
+        // 1.5 Prevent Self-Lockout (Chat Only)
+        // Users can stick manage their own video/audio/screen, but NOT disable their own chat.
         if (targetUsername === socket.user.username) {
-            return socket.emit('error-message', 'Operation Denied: You cannot modify your own permissions.');
+            if (feature === 'chat' && value === false) {
+                return socket.emit('error-message', 'Operation Denied: You cannot disable your own chat.');
+            }
+            // Allow other features for self
         }
 
         // 1.6 Role Hierarchy Check
@@ -291,13 +310,52 @@ io.on('connection', (socket) => {
         });
     });
 
+    // --- SUPERUSER: Change Role ---
+    socket.on('superuser-change-role', ({ targetUsername, newRole }) => {
+        if (socket.user.role !== 'superuser') {
+            return socket.emit('error-message', 'Unauthorized: Superuser only.');
+        }
+
+        const allowedRoles = ['admin', 'user'];
+        if (!allowedRoles.includes(newRole)) {
+            return socket.emit('error-message', 'Invalid role. Use "admin" or "user".');
+        }
+
+        const sql = "UPDATE users SET role = ? WHERE username = ?";
+        db.run(sql, [newRole, targetUsername], function (err) {
+            if (err) return socket.emit('error-message', 'Database error.');
+
+            if (this.changes === 0) {
+                return socket.emit('error-message', `User "${targetUsername}" not found.`);
+            }
+
+            // Update In-Memory
+            const targetSocketId = Object.keys(activeUsers).find(id => activeUsers[id].username === targetUsername);
+            if (targetSocketId && activeUsers[targetSocketId]) {
+                activeUsers[targetSocketId].role = newRole;
+                // Notify user to refresh their local role state
+                // We reuse 'my-identity' or create a specific one?
+                // Let's re-emit 'my-identity'.
+                const uData = activeUsers[targetSocketId];
+                io.to(targetSocketId).emit('my-identity', {
+                    role: newRole,
+                    permissions: uData.permissions || { chat: true, video: true, audio: true, screen: true },
+                    username: uData.username
+                });
+                socket.emit('admin-action-success', `Updated ${targetUsername} role to ${newRole}`);
+            } else {
+                socket.emit('admin-action-success', `Updated ${targetUsername} role to ${newRole} (User offline)`);
+            }
+        });
+    });
+
     // --- ADMIN: Get All Users ---
     socket.on('get-all-users', () => {
         if (socket.user.role !== 'admin' && socket.user.role !== 'superuser') {
             return socket.emit('error-message', 'Unauthorized: Admin only.');
         }
 
-        db.all("SELECT username, permissions FROM users", [], (err, rows) => {
+        db.all("SELECT username, role, permissions FROM users", [], (err, rows) => {
             if (err) return console.error(err);
 
             const usersList = rows.map(row => {
@@ -309,6 +367,7 @@ io.on('connection', (socket) => {
 
                 return {
                     username: row.username,
+                    role: row.role || 'user',
                     permissions,
                     isOnline
                 };
