@@ -223,8 +223,10 @@ io.on('connection', (socket) => {
             // Emit to Sender (so they see it in their tab) - mark as self!
             socket.emit('private message', { username: from, message, timestamp, recipient: to, isSelf: true });
 
-            // Emit to Recipient
-            io.to(recipientSocketId).emit('private message', { username: from, message, timestamp, recipient: from, isSelf: false });
+            // Emit to Recipient (only if not sending to self, or if sending to a DIFFERENT socket of self)
+            if (recipientSocketId && recipientSocketId !== socket.id) {
+                io.to(recipientSocketId).emit('private message', { username: from, message, timestamp, recipient: from, isSelf: false });
+            }
         });
     });
 });

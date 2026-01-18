@@ -834,6 +834,7 @@
 
         // --- GLOBAL: All Users Data (for Admin) ---
         let allUsers = [];
+        const bufferedPrivateMessages = {}; // Stores history for unopened tabs
 
         async function main() {
             try {
@@ -1666,7 +1667,7 @@
 
                 // In private/call.html
 
-                function addChatMessage({ username, message, timestamp, recipient, isSelf }) {
+                function addChatMessage({ username, message, timestamp, recipient, isSelf }, logToConsole = true, bufferIfNoTab = false) {
                     const item = document.createElement('li');
 
                     // TIMESTAMP LOGIC
@@ -1743,7 +1744,16 @@
                         const otherUser = isSelf ? recipient : username;
 
                         // Create tab if needed
+                        // Create tab if needed
                         let tabBtn = document.querySelector(`.chat-tab[data-tab="${otherUser}"]`);
+
+                        // BUFFERING LOGIC for Private History
+                        if (!tabBtn && bufferIfNoTab) {
+                            if (!bufferedPrivateMessages[otherUser]) bufferedPrivateMessages[otherUser] = [];
+                            bufferedPrivateMessages[otherUser].push({ username, message, timestamp, recipient, isSelf });
+                            return; // Do not create tab, do not display yet
+                        }
+
                         if (!tabBtn) {
                             createTab(otherUser);
                         }
@@ -1870,6 +1880,15 @@
                     messagesArea.appendChild(ul);
 
                     if (switchToIt) switchTab(username);
+
+                    // REPLAY BUFFERED MESSAGES
+                    if (bufferedPrivateMessages[username]) {
+                        bufferedPrivateMessages[username].forEach(msgData => {
+                            // Recursively call addChatMessage, ensuring we don't buffer again
+                            addChatMessage(msgData, false, false);
+                        });
+                        delete bufferedPrivateMessages[username];
+                    }
                 }
 
                 window.createTab = createTab;
@@ -1901,7 +1920,7 @@
                     history.forEach(msg => {
                         // Compatibility shim if history item structure varies
                         if (!msg.username) return;
-                        addChatMessage(msg);
+                        addChatMessage(msg, false, true);
                     });
                 });
 
