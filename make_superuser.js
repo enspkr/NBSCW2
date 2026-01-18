@@ -1,5 +1,5 @@
 const sqlite3 = require('sqlite3').verbose();
-const db = new sqlite3.Database('./chat.db');
+const db = new sqlite3.Database('./synapse.db');
 
 const username = process.argv[2];
 
