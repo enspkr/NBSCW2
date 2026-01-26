@@ -641,6 +641,23 @@
         <button id="history-clear-all-btn" style="background-color: #d93025;">Clear All</button>
         <button id="history-close-btn">Close</button>
     </div>
+    <div id="status-modal" class="modal-overlay">
+        <div class="modal-content" style="max-width: 400px; text-align: left;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                <h2 style="margin:0;">🖥️ Server Status</h2>
+                <span id="status-close-btn" class="close-btn" style="cursor:pointer; font-size:1.5em;">&times;</span>
+            </div>
+
+            <div id="status-content"
+                style="margin-bottom:20px; font-family: monospace; font-size: 1.1em; line-height: 1.6;">
+                <!-- Content populated by JS -->
+            </div>
+
+            <div class="modal-buttons" style="justify-content: center;">
+                <button id="status-refresh-btn" style="background-color: var(--primary-accent);">Refresh</button>
+            </div>
+        </div>
+    </div>
     </div>
     </div>
 
@@ -929,6 +946,67 @@
 
                     refreshBtn.onclick = () => { socket.emit('chat message', '/logs'); }; // Re-trigger
                     clearBtn.onclick = () => { container.innerHTML = ''; };
+                });
+
+                // --- REALTIME LOG LISTENER ---
+                socket.on('log-entry', (l) => {
+                    // Only append if modal is open? Or always?
+                    // Let's always append if the container exists, so when they open it, it's fresh?
+                    // Actually, if modal is closed, appending to innerHTML is fine.
+                    // But if it's closed, maybe we don't care about memory?
+                    // Let's just append.
+                    const container = document.getElementById('logs-container');
+                    if (!container) return;
+
+                    const color = l.type === 'ERROR' ? 'red' : '#0f0';
+                    const div = document.createElement('div');
+                    div.style.color = color;
+                    div.innerHTML = `<span style="color:#666">[${l.timestamp}]</span> [${l.type}] ${window.escapeHtml(l.msg)}`;
+
+                    container.appendChild(div);
+                    // Auto-scroll if near bottom
+                    container.scrollTop = container.scrollHeight;
+                });
+
+                // --- SERVER STATUS MODAL LISTENER ---
+                socket.on('server-status-data', (data) => {
+                    const modal = document.getElementById('status-modal');
+                    const content = document.getElementById('status-content');
+                    const closeBtn = document.getElementById('status-close-btn');
+                    const refreshBtn = document.getElementById('status-refresh-btn');
+
+                    const usedMB = (data.memory.used / 1024 / 1024).toFixed(2);
+                    const totalMB = (data.memory.total / 1024 / 1024).toFixed(2);
+                    const uptimeHrs = (data.uptime / 3600).toFixed(2);
+
+                    // Simple progress bar
+                    const memPercent = Math.round((data.memory.used / data.memory.total) * 100);
+                    const barColor = memPercent > 80 ? '#d93025' : '#4caf50';
+
+                    content.innerHTML = `
+                        <div style="margin-bottom:10px;"><strong>CPU Cores:</strong> ${data.cpuCount}</div>
+                        <div style="margin-bottom:10px;"><strong>Load Avg:</strong> ${data.loadAvg.map(n => n.toFixed(2)).join(', ')}</div>
+                        <div style="margin-bottom:10px;"><strong>Uptime:</strong> ${uptimeHrs} hours</div>
+                        <div style="margin-bottom:5px;"><strong>Memory:</strong> ${usedMB} / ${totalMB} MB</div>
+                        <div style="width:100%; background:#444; height:10px; border-radius:5px; overflow:hidden;">
+                            <div style="width:${memPercent}%; background:${barColor}; height:100%;"></div>
+                        </div>
+                    `;
+
+                    modal.style.display = 'flex';
+
+                    closeBtn.onclick = () => modal.style.display = 'none';
+                    refreshBtn.onclick = () => { socket.emit('chat message', '/serverstatus'); };
+
+                    // Close on outside click
+                    window.onclick = (e) => {
+                        if (e.target === modal) modal.style.display = 'none';
+                        // Keep other modals working too if they share window.onclick?
+                        // window.onclick overrides previous ones.
+                        // We need a unified modal manager or check all.
+                        // For now, simpler: attach to modal click
+                    };
+                    modal.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
                 });
 
                 socket.on('all-users-data', (data) => {
@@ -1225,6 +1303,7 @@
                     { cmd: '/clearhistory', role: 'all' },
                     { cmd: '/clear', role: 'admin' },
                     { cmd: '/roll', role: 'all' },
+                    { cmd: '/serverstatus', role: 'admin' },
 
                     { cmd: '/admin', role: 'admin' },
                     { cmd: '/refresh', role: 'admin' },

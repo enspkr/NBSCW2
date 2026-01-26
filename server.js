@@ -3,6 +3,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require("socket.io");
 const path = require('path');
+const os = require('os');
 const db = require('./database.js');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
@@ -28,6 +29,10 @@ function bufferLog(type, args) {
 
     serverLogs.push({ timestamp, type, msg });
     if (serverLogs.length > MAX_LOGS) serverLogs.shift();
+
+    // --- REALTIME LOGS ---
+    // Emit to 'admin-room'
+    if (io) io.to('admin-room').emit('log-entry', { timestamp, type, msg });
 }
 
 // Hook into console
@@ -161,6 +166,37 @@ io.on('connection', (socket) => {
             }
             socket.emit('server-logs', serverLogs);
             socket.emit('chat message', { username: 'System', message: 'Fetching server logs...' });
+            return;
+        }
+
+        // --- SERVER STATUS COMMAND ---
+        if (message.trim() === '/serverstatus') {
+            const role = activeUsers[socket.id]?.role || socket.user.role;
+            if (role !== 'admin' && role !== 'superuser') {
+                socket.emit('error-message', 'Unauthorized: Admin only.');
+                return;
+            }
+
+            const cpus = os.cpus();
+            const loadAvg = os.loadavg();
+            const totalMem = os.totalmem();
+            const freeMem = os.freemem();
+            const usedMem = totalMem - freeMem;
+            const uptime = os.uptime();
+
+            const data = {
+                cpuCount: cpus.length,
+                loadAvg: loadAvg,
+                memory: {
+                    total: totalMem,
+                    free: freeMem,
+                    used: usedMem
+                },
+                uptime: uptime
+            };
+
+            // Emit data event instead of text message
+            socket.emit('server-status-data', data);
             return;
         }
 
@@ -310,6 +346,11 @@ io.on('connection', (socket) => {
 
         // Tell the user their own permissions/role immediately
         socket.emit('my-identity', { role, permissions, username: socket.user.username });
+
+        // --- REALTIME LOGS: Join Admin Room ---
+        if (role === 'admin' || role === 'superuser') {
+            socket.join('admin-room');
+        }
 
         // --- Fetch Chat History (Last 50) ---
         // We order by timestamp DESC to get the latest, then reverse it for display
