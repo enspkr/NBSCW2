@@ -727,6 +727,15 @@
         <!-- Moved controls inside main-content for correct centering -->
         <div id="controls">
             <button id="mute-btn">Mute Mic</button>
+            <button id="deafen-btn" title="Deafen (Voice Only)">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 18v-6a9 9 0 0 1 18 0v6"></path>
+                    <path
+                        d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z">
+                    </path>
+                </svg>
+            </button>
             <button id="camera-btn">Turn Camera Off</button>
             <button id="screen-share-btn">Share Screen</button>
             <button id="chat-btn" class="active">Chat</button>
@@ -781,6 +790,7 @@
                 <label><input type="checkbox" id="perm-video"> Allow Video</label>
                 <label><input type="checkbox" id="perm-audio"> Allow Audio</label>
                 <label><input type="checkbox" id="perm-screen"> Allow Screen Share</label>
+                <label><input type="checkbox" id="perm-hearing"> Allow Hearing</label>
             </div>
             <br>
             <br>
@@ -895,7 +905,74 @@
         let localStream, screenStream;
         let isScreenSharing = false;
 
-        // --- Shared AudioContext to prevent limit errors and handle autoplay state ---
+        // --- Deafen Logic ---
+        let isDeafened = false;
+
+        function toggleDeafen(forceState = null) {
+            const btn = document.getElementById('deafen-btn');
+
+            if (forceState !== null) {
+                isDeafened = forceState;
+            } else {
+                isDeafened = !isDeafened;
+            }
+
+            // Update Global Master Gain
+            if (window.masterGainNode) {
+                window.masterGainNode.gain.value = isDeafened ? 0 : 1;
+            }
+
+            // Update UI
+            if (isDeafened) {
+                btn.classList.add('active'); // Red styling
+                btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"></path><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path><line x1="2" y1="2" x2="22" y2="22"></line></svg>`; // Headset Off
+            } else {
+                btn.classList.remove('active');
+                btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"></path><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path></svg>`;
+            }
+        }
+
+        // Attach event listener instead of using onclick HTML attribute
+        document.getElementById('deafen-btn').addEventListener('click', () => toggleDeafen());
+        document.getElementById('mute-btn').addEventListener('click', toggleMute); // Sync legacy click if needed
+
+        function toggleMute() {
+            // Permission Check
+            if (typeof myPermissions !== 'undefined' && myPermissions.audio === false) {
+                return alert("Admin has successfully disabled your microphone.");
+            }
+
+            if (!localStream) {
+                return;
+            }
+            const audioTrack = localStream.getAudioTracks()[0];
+
+            if (audioTrack) {
+                audioTrack.enabled = !audioTrack.enabled;
+                const isMuted = !audioTrack.enabled;
+
+                const muteBtn = document.getElementById('mute-btn');
+                if (muteBtn) {
+                    if (isMuted) {
+                        muteBtn.textContent = 'Unmute Mic';
+                        muteBtn.classList.add('active');
+                    } else {
+                        muteBtn.textContent = 'Mute Mic';
+                        muteBtn.classList.remove('active');
+                    }
+                }
+
+                if (typeof socket !== 'undefined') {
+                    socket.emit('mute-status-changed', { isMuted });
+                }
+
+                const localContainer = document.getElementById('local-video-container');
+                if (localContainer) {
+                    setMuteIndicator(localContainer, isMuted);
+                }
+            }
+        }
+
         let sharedAudioContext = null;
 
         // --- PERMISSIONS GLOBALS ---
@@ -1071,6 +1148,22 @@
             if (!perms.screen && isScreenSharing) {
                 toggleScreenShare(false, socket); // Stop sharing immediately
                 alert("Your screen share was stopped by an admin.");
+            }
+
+            // 4. Hearing (New)
+            const deafenBtn = document.getElementById('deafen-btn');
+            if (deafenBtn) {
+                if (perms.hearing === false) { // Explicitly False
+                    if (!isDeafened) {
+                        toggleDeafen(true);
+                        alert("Your ability to hear has been disabled by an admin.");
+                    }
+                    deafenBtn.disabled = true;
+                    deafenBtn.title = "Hearing disabled by admin";
+                } else {
+                    deafenBtn.disabled = false;
+                    deafenBtn.title = "Deafen (Voice Only)";
+                }
             }
         }
 
@@ -1310,24 +1403,9 @@
                 });
 
                 // Step 4: Set up controls.
+                // Mute logic moved to toggleMute()
                 const muteBtn = document.getElementById('mute-btn');
-                muteBtn.addEventListener('click', () => {
-                    // Permission Check
-                    if (myPermissions && myPermissions.audio === false) {
-                        return alert("Admin has successfully disabled your microphone.");
-                    }
-
-                    const audioTrack = localStream.getAudioTracks()[0];
-                    if (audioTrack) {
-                        audioTrack.enabled = !audioTrack.enabled;
-                        const isMuted = !audioTrack.enabled;
-                        muteBtn.textContent = isMuted ? 'Unmute Mic' : 'Mute Mic';
-                        muteBtn.classList.toggle('active', isMuted);
-                        setMuteIndicator(document.getElementById('local-video-container'), isMuted);
-                        // This line tells everyone else you are muted
-                        socket.emit('mute-status-changed', { isMuted });
-                    }
-                });
+                // muteBtn listener already attached via addEventListener above
 
                 const cameraBtn = document.getElementById('camera-btn');
                 cameraBtn.addEventListener('click', () => {
@@ -2462,13 +2540,15 @@
             const pVideo = document.getElementById('perm-video');
             const pAudio = document.getElementById('perm-audio');
             const pScreen = document.getElementById('perm-screen');
+            const pHearing = document.getElementById('perm-hearing');
 
             // Set current state (default to true if missing)
-            const perms = user.permissions || { chat: true, video: true, audio: true, screen: true };
+            const perms = user.permissions || { chat: true, video: true, audio: true, screen: true, hearing: true };
             pChat.checked = perms.chat !== false;
             pVideo.checked = perms.video !== false;
             pAudio.checked = perms.audio !== false;
             pScreen.checked = perms.screen !== false;
+            pHearing.checked = perms.hearing !== false;
 
             // CLIENT SAFEGUARD: Logic for UI state
 
@@ -2476,7 +2556,7 @@
             const targetRole = user.role || 'user'; // We need to make sure we have role. 'allUsers' has it. 'remoteUsers' needs it.
 
             // Reset Disabled State first
-            [pChat, pVideo, pAudio, pScreen].forEach(el => el.disabled = false);
+            [pChat, pVideo, pAudio, pScreen, pHearing].forEach(el => el.disabled = false);
             title.innerText = `Manage ${user.username}` + (user.isOnline === false ? ' (Offline)' : '');
 
             // 1. SELF MANAGEMENT
@@ -2515,6 +2595,7 @@
             pVideo.onclick = () => updatePerm('video', pVideo.checked);
             pAudio.onclick = () => updatePerm('audio', pAudio.checked);
             pScreen.onclick = () => updatePerm('screen', pScreen.checked);
+            pHearing.onclick = () => updatePerm('hearing', pHearing.checked);
 
             // --- SUPERUSER: Change Role Section ---
             const roleSection = document.getElementById('superuser-role-section');
@@ -2721,10 +2802,16 @@
                         const analyser = audioContext.createAnalyser();
                         analyser.fftSize = 256;
 
-                        // Route: Source -> Gain -> Analyser -> Speakers
+                        // Route: Source -> Gain (Per User) -> Analyser -> Master Gain (Global) -> Speakers
                         source.connect(gainNode);
                         gainNode.connect(analyser);
-                        analyser.connect(audioContext.destination);
+
+                        // Connect to the global master gain node (created globally once)
+                        if (!window.masterGainNode) {
+                            window.masterGainNode = audioContext.createGain();
+                            window.masterGainNode.connect(audioContext.destination);
+                        }
+                        analyser.connect(window.masterGainNode);
 
                         // Store GainNode
                         remoteGainNodes[socketId] = gainNode;
