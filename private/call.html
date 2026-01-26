@@ -2183,6 +2183,81 @@
             const pc = new RTCPeerConnection({ iceServers });
             peerConnections[socketId] = pc;
 
+            // --- WebRTC Connection Monitoring & Logging ---
+            console.log(`[WebRTC] Creating connection to ${userData.username} (initiator: ${isInitiator})`);
+
+            // Check if TURN is configured
+            const hasTurn = iceServers.some(s => s.urls && (Array.isArray(s.urls) ? s.urls.some(u => u.includes('turn:')) : s.urls.includes('turn:')));
+            if (!hasTurn) {
+                console.warn(`[WebRTC] ⚠️ No TURN server configured - users behind firewalls may not connect`);
+            }
+
+            // Monitor connection state changes
+            pc.onconnectionstatechange = () => {
+                console.log(`[WebRTC] ${userData.username} connection state: ${pc.connectionState}`);
+
+                if (pc.connectionState === 'connected') {
+                    console.log(`[WebRTC] ✅ Successfully connected to ${userData.username}`);
+                } else if (pc.connectionState === 'failed') {
+                    console.error(`[WebRTC] ❌ Connection to ${userData.username} FAILED`);
+                    console.error(`[WebRTC] Possible reasons: firewall blocking, no TURN server, network issues`);
+
+                    // Show error to user
+                    addChatMessage({
+                        username: 'System',
+                        message: `⚠️ Cannot connect to ${userData.username}. They may be behind a firewall.`
+                    });
+                } else if (pc.connectionState === 'disconnected') {
+                    console.warn(`[WebRTC] ⚠️ Disconnected from ${userData.username}`);
+                }
+            };
+
+            // Monitor ICE connection state
+            pc.oniceconnectionstatechange = () => {
+                console.log(`[WebRTC] ${userData.username} ICE state: ${pc.iceConnectionState}`);
+
+                if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+                    console.log(`[WebRTC] ✅ ICE connection established with ${userData.username}`);
+                } else if (pc.iceConnectionState === 'failed') {
+                    console.error(`[WebRTC] ❌ ICE connection to ${userData.username} FAILED`);
+                    if (!hasTurn) {
+                        console.error(`[WebRTC] ⚠️ NO TURN SERVER - This is likely why the connection failed`);
+                        console.error(`[WebRTC] Solution: Configure TURN server in .env file`);
+                    } else {
+                        console.error(`[WebRTC] TURN is configured but connection still failed`);
+                        console.error(`[WebRTC] Possible reasons: both users behind symmetric NAT, network blocking UDP`);
+                    }
+                } else if (pc.iceConnectionState === 'checking') {
+                    console.log(`[WebRTC] 🔍 Checking ICE candidates for ${userData.username}...`);
+                }
+            };
+
+            // Monitor ICE gathering
+            pc.onicegatheringstatechange = () => {
+                console.log(`[WebRTC] ${userData.username} ICE gathering: ${pc.iceGatheringState}`);
+            };
+
+            // Log ICE candidates with type detection
+            const originalIceCandidateHandler = pc.onicecandidate;
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    const candidate = event.candidate.candidate;
+
+                    // Detect candidate type
+                    if (candidate.includes('typ host')) {
+                        console.log(`[WebRTC] ${userData.username} - Local candidate (typ host)`);
+                    } else if (candidate.includes('typ srflx')) {
+                        console.log(`[WebRTC] ${userData.username} - Public IP candidate (typ srflx) via STUN`);
+                    } else if (candidate.includes('typ relay')) {
+                        console.log(`[WebRTC] ${userData.username} - ✅ TURN relay candidate (typ relay) - TURN working!`);
+                    }
+
+                    socket.emit('webrtc-ice-candidate', socketId, event.candidate);
+                } else {
+                    console.log(`[WebRTC] ${userData.username} - ICE gathering complete`);
+                }
+            };
+
             // --- Sending logic UPDATED for Audio Mixing ---
             // 1. Add the VIDEO track (either Camera or Screen)
             const videoStream = isScreenSharing ? screenStream : localStream;
@@ -2193,8 +2268,6 @@
                 const mixedTrack = mixedAudioStream.getAudioTracks()[0];
                 pc.addTrack(mixedTrack, mixedAudioStream);
             }
-
-            pc.onicecandidate = (event) => { if (event.candidate) { socket.emit('webrtc-ice-candidate', socketId, event.candidate); } };
 
             // --- THIS IS THE CORRECTED RECEIVING LOGIC ---
             pc.ontrack = (event) => {
