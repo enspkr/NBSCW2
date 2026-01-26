@@ -238,6 +238,38 @@
             color: white;
         }
 
+        /* --- MOBILE MUTE BUTTON --- */
+        .mobile-mute-btn {
+            position: absolute;
+            top: 45px;
+            /* Below pin button (top:8px + 32px + 5px) */
+            right: 8px;
+            width: 32px;
+            height: 32px;
+            background-color: rgba(0, 0, 0, 0.6);
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            z-index: 10;
+            display: none;
+            /* Hidden by default (desktop) */
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+
+        .mobile-mute-btn.muted {
+            background-color: rgba(217, 48, 37, 0.8);
+            /* Red when muted locally */
+        }
+
+        @media (max-width: 768px) {
+            .mobile-mute-btn {
+                display: flex;
+                /* Show on mobile */
+            }
+        }
+
         /* --- NEW MODAL STYLES --- */
         .modal-overlay {
             position: fixed;
@@ -484,6 +516,131 @@
             flex-grow: 1;
             overflow-y: auto;
         }
+
+        #mobile-menu-toggle {
+            display: none;
+        }
+
+        @media (max-width: 768px) {
+            #video-grid {
+                display: grid !important;
+                grid-template-columns: 1fr 1fr !important;
+                grid-auto-rows: min-content;
+                align-content: start;
+                overflow-y: auto;
+                padding-bottom: 80px;
+                /* Space for menu button */
+            }
+
+            .video-container {
+                aspect-ratio: 1 / 1;
+                /* Make them square-ish or let them flow? Sketch shows square quadrants */
+                min-height: 0;
+            }
+
+            /* Hide default controls on active mobile */
+            #controls {
+                display: none !important;
+                bottom: 80px;
+                /* Position above menu button */
+                flex-wrap: wrap;
+                justify-content: center;
+                width: 90%;
+            }
+
+            #controls.visible-mobile {
+                display: flex !important;
+            }
+
+            /* HIDE menu button when Chat is open to prevent overlap */
+            body.chat-active #mobile-menu-toggle {
+                display: none !important;
+            }
+
+            #mobile-menu-toggle {
+                display: block;
+                position: fixed;
+                bottom: 20px;
+                left: 50%;
+                transform: translateX(-50%);
+                z-index: 101;
+                padding: 10px 40px;
+                border: 2px solid #fff;
+                border-radius: 12px;
+                background-color: transparent;
+                color: white;
+                font-size: 1.2rem;
+                font-family: inherit;
+                cursor: pointer;
+            }
+
+            /* --- MOBILE PINNED LAYOUT --- */
+            #video-grid.pinned-mode {
+                display: flex !important;
+                flex-direction: column !important;
+                height: 100%;
+                overflow: hidden;
+                /* Prevent main scroll, let flex handle it */
+                padding-bottom: 0px;
+                /* Reset padding */
+            }
+
+            #video-grid.pinned-mode .video-container.pinned {
+                width: 100% !important;
+                height: 65% !important;
+                /* Top 65% */
+                flex-shrink: 0;
+                border-bottom: 2px solid #333;
+            }
+
+            /* The unpinned bar (dynamically created) */
+            #unpinned-bar {
+                width: 100% !important;
+                height: 35% !important;
+                /* Bottom 35% */
+                display: flex !important;
+                flex-direction: row !important;
+                overflow-x: auto;
+                padding: 10px;
+                box-sizing: border-box;
+                justify-content: flex-start;
+                /* items start from left */
+                gap: 10px;
+                /* Ensure it sits below menu button if menu is there? No, menu is overlay. */
+                padding-bottom: 80px;
+                /* Space for Menu button */
+            }
+
+            .video-container.unpinned {
+                height: 100% !important;
+                width: auto !important;
+                aspect-ratio: 16/9;
+                /* Maintain ratio */
+                flex-shrink: 0;
+            }
+
+            /* Chat Overlay */
+            #chat-container {
+                width: 100% !important;
+                height: 100% !important;
+                top: 0 !important;
+                right: 0 !important;
+                left: 0 !important;
+                bottom: 0 !important;
+                z-index: 200 !important;
+                /* Higher than menu button (101) */
+                transform: translateY(100%);
+            }
+
+            #chat-container.hidden {
+                /* Existing hidden is translateX(100%) - that works for overlay too */
+                transform: translateX(100%);
+            }
+
+            #chat-container:not(.hidden) {
+                transform: translateX(0);
+            }
+        }
     </style>
 </head>
 
@@ -536,6 +693,7 @@
         <button id="chat-btn" class="active">Chat</button>
         <button id="hangup-btn">Hang Up</button>
     </div>
+    <button id="mobile-menu-toggle">Menu</button>
 
     <!-- ADMIN MODAL -->
     <div id="admin-modal" class="modal-overlay">
@@ -1129,6 +1287,13 @@
                     chatContainer.classList.toggle('hidden');
                     const isHidden = chatContainer.classList.contains('hidden');
                     chatBtn.classList.toggle('active', !isHidden);
+
+                    // Toggle body class for mobile menu hiding
+                    if (!isHidden) {
+                        document.body.classList.add('chat-active');
+                    } else {
+                        document.body.classList.remove('chat-active');
+                    }
                 }
 
                 chatBtn.addEventListener('click', toggleChat);
@@ -1173,6 +1338,14 @@
                     if (e.target === qualityModal) {
                         qualityModal.classList.remove('visible');
                     }
+                });
+
+                // --- MOBILE MENU TOGGLE ---
+                const mobileMenuBtn = document.getElementById('mobile-menu-toggle');
+                const controlsDiv = document.getElementById('controls');
+
+                mobileMenuBtn.addEventListener('click', () => {
+                    controlsDiv.classList.toggle('visible-mobile');
                 });
                 // Inside your main() function
 
@@ -2369,6 +2542,38 @@
                     videoContainer.appendChild(usernameDiv);
                     addPinButton(videoContainer);
                     addClientMuteControls(videoContainer, socket);
+
+                    // --- NEW: Mobile Mute Button (Added directly here) ---
+                    const mobileMuteBtn = document.createElement('button');
+                    mobileMuteBtn.className = 'mobile-mute-btn';
+                    mobileMuteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>`; // Default: Unmuted icon? No, wait. Default state is Unmuted (Gain 1). Button should show "Mute" action or "Speaker On" status?
+                    // Usually: Icon shows current state. 
+                    // Let's use Speaker On icon for unmuted, Speaker Off for muted.
+                    // Initial State: Unmuted.
+                    mobileMuteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>`;
+
+                    mobileMuteBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        // Find gain node
+                        const gainNode = remoteGainNodes[socketId];
+                        if (gainNode) {
+                            const isNowMuted = (gainNode.gain.value === 0);
+
+                            if (isNowMuted) {
+                                // Unmute
+                                gainNode.gain.value = 1;
+                                mobileMuteBtn.classList.remove('muted');
+                                mobileMuteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>`;
+                            } else {
+                                // Mute
+                                gainNode.gain.value = 0;
+                                mobileMuteBtn.classList.add('muted');
+                                mobileMuteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"></path><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>`;
+                            }
+                        }
+                    };
+                    videoContainer.appendChild(mobileMuteBtn);
+
                     videoGrid.appendChild(videoContainer);
                     setMuteIndicator(videoContainer, userData.isMuted);
                 }
