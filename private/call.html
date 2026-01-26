@@ -235,6 +235,16 @@
             opacity: 1;
         }
 
+        @media (max-width: 768px) {
+            .client-controls {
+                opacity: 1 !important;
+                /* Always visible on mobile */
+                bottom: 5px;
+                /* Adjust position if needed */
+                right: 5px;
+            }
+        }
+
         .client-controls button {
             width: 32px;
             height: 32px;
@@ -246,39 +256,65 @@
             align-items: center;
             justify-content: center;
             color: white;
+            flex-shrink: 0;
         }
 
-        /* --- MOBILE MUTE BUTTON --- */
-        .mobile-mute-btn {
-            position: absolute;
-            top: 45px;
-            /* Below pin button (top:8px + 32px + 5px) */
-            right: 8px;
-            width: 32px;
-            height: 32px;
-            background-color: rgba(0, 0, 0, 0.6);
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            z-index: 10;
-            display: none;
-            /* Hidden by default (desktop) */
+        /* --- VOLUME SLIDER STYLES --- */
+        .volume-control-group {
+            display: flex;
             align-items: center;
-            justify-content: center;
+            background-color: rgba(0, 0, 0, 0.6);
+            padding: 0 8px;
+            border-radius: 6px;
+            height: 32px;
+            gap: 5px;
+        }
+
+        .volume-icon {
             color: white;
+            display: flex;
+            align-items: center;
         }
 
-        .mobile-mute-btn.muted {
-            background-color: rgba(217, 48, 37, 0.8);
-            /* Red when muted locally */
+        .volume-slider {
+            -webkit-appearance: none;
+            width: 60px;
+            height: 4px;
+            border-radius: 2px;
+            background: rgba(255, 255, 255, 0.3);
+            outline: none;
         }
 
-        @media (max-width: 768px) {
-            .mobile-mute-btn {
-                display: flex;
-                /* Show on mobile */
-            }
+        .volume-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: white;
+            cursor: pointer;
+            transition: background .15s ease-in-out;
         }
+
+        .volume-slider::-webkit-slider-thumb:hover {
+            background: var(--primary-accent);
+        }
+
+        .volume-slider::-moz-range-thumb {
+            width: 12px;
+            height: 12px;
+            border: 0;
+            border-radius: 50%;
+            background: white;
+            cursor: pointer;
+            transition: background .15s ease-in-out;
+        }
+
+        .volume-slider::-moz-range-thumb:hover {
+            background: var(--primary-accent);
+        }
+
+
 
         /* --- NEW MODAL STYLES --- */
         .modal-overlay {
@@ -2271,49 +2307,92 @@
         const speakerOffIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5z"></path><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>`;
         // This is the new function to add the separate mute buttons
         // This is the new function to add the separate mute buttons
+        // This is the new function to add the separate mute buttons (Now Volume Sliders)
         function addClientMuteControls(videoContainer, socket) {
             const controlsContainer = document.createElement('div');
             controlsContainer.className = 'client-controls';
 
-            // Button to mute the user's voice (mic)
-            const muteVoiceBtn = document.createElement('button');
-            muteVoiceBtn.innerHTML = speakerIcon;
-            muteVoiceBtn.title = 'Mute Voice';
-            muteVoiceBtn.onclick = (e) => {
-                e.stopPropagation();
+            // --- Voice Volume Control ---
+            const voiceGroup = document.createElement('div');
+            voiceGroup.className = 'volume-control-group';
+            voiceGroup.title = 'Voice Volume';
+
+            const voiceIcon = document.createElement('div');
+            voiceIcon.className = 'volume-icon';
+            voiceIcon.innerHTML = speakerIcon; // Default icon
+
+            const voiceSlider = document.createElement('input');
+            voiceSlider.type = 'range';
+            voiceSlider.className = 'volume-slider';
+            voiceSlider.min = 0;
+            voiceSlider.max = 1;
+            voiceSlider.step = 0.05;
+            voiceSlider.value = 1;
+
+            voiceSlider.oninput = (e) => {
+                e.stopPropagation(); // Prevent drag from moving window if we had draggable logic, but mainly prevent click passthrough
+                const val = parseFloat(voiceSlider.value);
                 const socketId = videoContainer.id;
                 const gainNode = remoteGainNodes[socketId];
                 if (gainNode) {
-                    // Toggle gain between 0 (muted) and 1 (unmuted)
-                    const isMuted = gainNode.gain.value === 0;
-                    gainNode.gain.value = isMuted ? 1 : 0;
-                    muteVoiceBtn.innerHTML = isMuted ? speakerOffIcon : speakerIcon;
-                } else {
-                    muteVoiceBtn.innerHTML = speakerOffIcon;
+                    gainNode.gain.value = val;
                 }
+                // Update Icon
+                voiceIcon.innerHTML = (val === 0) ? speakerOffIcon : speakerIcon;
             };
+            // Prevent container click events when interacting with slider
+            voiceSlider.onmousedown = (e) => e.stopPropagation();
+            voiceSlider.onclick = (e) => e.stopPropagation();
 
-            // Button to mute the stream's audio (screen share audio)
-            const muteStreamBtn = document.createElement('button');
-            muteStreamBtn.innerHTML = speakerIcon;
-            muteStreamBtn.title = 'Mute Stream';
-            muteStreamBtn.onclick = (e) => {
+            voiceGroup.appendChild(voiceIcon);
+            voiceGroup.appendChild(voiceSlider);
+            controlsContainer.appendChild(voiceGroup);
+
+
+            // --- Stream Volume Control ---
+            const streamGroup = document.createElement('div');
+            streamGroup.className = 'volume-control-group';
+            streamGroup.title = 'Stream Volume';
+
+            const streamIcon = document.createElement('div');
+            streamIcon.className = 'volume-icon';
+            // Use a different color or modifier to distinguish? Or just tooltip. 
+            // Maybe add a small 'S' badge? For now standard icon.
+            streamIcon.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>`; // Monitor icon
+
+            const streamSlider = document.createElement('input');
+            streamSlider.type = 'range';
+            streamSlider.className = 'volume-slider';
+            streamSlider.min = 0;
+            streamSlider.max = 1;
+            streamSlider.step = 0.05;
+            streamSlider.value = 1; // Default
+
+            // Check current volume if re-rendering? (Not handled here, assuming new)
+
+            streamSlider.oninput = (e) => {
                 e.stopPropagation();
+                const val = parseFloat(streamSlider.value);
                 const videoEl = videoContainer.querySelector('video');
                 if (videoEl) {
-                    videoEl.muted = !videoEl.muted;
-                    muteStreamBtn.innerHTML = videoEl.muted ? speakerOffIcon : speakerIcon;
+                    videoEl.volume = val;
+                    // videoEl.muted = (val === 0); // volume 0 acts as muted, but property is separate.
+                    // Actually, if we set volume to 0 it is silent.
                 }
             };
+            streamSlider.onmousedown = (e) => e.stopPropagation();
+            streamSlider.onclick = (e) => e.stopPropagation();
 
-            controlsContainer.appendChild(muteVoiceBtn);
-            controlsContainer.appendChild(muteStreamBtn);
+            streamGroup.appendChild(streamIcon);
+            streamGroup.appendChild(streamSlider);
+            controlsContainer.appendChild(streamGroup);
 
             // --- ADMIN CONTROLS ---
             if (myRole === 'admin' || myRole === 'superuser') {
                 const adminBtn = document.createElement('button');
                 adminBtn.innerText = '⚙';
                 adminBtn.title = 'Manage User';
+                adminBtn.style.marginLeft = '4px'; // Spacing from sliders
                 adminBtn.onclick = (e) => {
                     e.stopPropagation();
                     openAdminModal(videoContainer.id, socket);
@@ -2614,36 +2693,7 @@
                     addPinButton(videoContainer);
                     addClientMuteControls(videoContainer, socket);
 
-                    // --- NEW: Mobile Mute Button (Added directly here) ---
-                    const mobileMuteBtn = document.createElement('button');
-                    mobileMuteBtn.className = 'mobile-mute-btn';
-                    mobileMuteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>`; // Default: Unmuted icon? No, wait. Default state is Unmuted (Gain 1). Button should show "Mute" action or "Speaker On" status?
-                    // Usually: Icon shows current state. 
-                    // Let's use Speaker On icon for unmuted, Speaker Off for muted.
-                    // Initial State: Unmuted.
-                    mobileMuteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>`;
 
-                    mobileMuteBtn.onclick = (e) => {
-                        e.stopPropagation();
-                        // Find gain node
-                        const gainNode = remoteGainNodes[socketId];
-                        if (gainNode) {
-                            const isNowMuted = (gainNode.gain.value === 0);
-
-                            if (isNowMuted) {
-                                // Unmute
-                                gainNode.gain.value = 1;
-                                mobileMuteBtn.classList.remove('muted');
-                                mobileMuteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>`;
-                            } else {
-                                // Mute
-                                gainNode.gain.value = 0;
-                                mobileMuteBtn.classList.add('muted');
-                                mobileMuteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"></path><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>`;
-                            }
-                        }
-                    };
-                    videoContainer.appendChild(mobileMuteBtn);
 
                     videoGrid.appendChild(videoContainer);
                     setMuteIndicator(videoContainer, userData.isMuted);
