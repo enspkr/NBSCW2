@@ -25,12 +25,21 @@
             height: 100vh;
             width: 100vw;
             overflow: hidden;
+            /* Flex layout for body to support side-by-side chat */
+            display: flex;
+            flex-direction: row;
         }
 
         .main-content {
+            /* Changed to flex-grow to take available space */
+            flex-grow: 1;
+            /* Ensure it shrinks if needed */
+            min-width: 0;
             height: 100%;
-            width: 100%;
+            /* Ensure relative positioning for absolute children like controls */
+            position: relative;
             display: flex;
+            flex-direction: column;
         }
 
         #video-grid {
@@ -164,7 +173,8 @@
         }
 
         #controls {
-            position: fixed;
+            position: absolute;
+            /* Changed to absolute to sit inside .main-content */
             bottom: 20px;
             left: 50%;
             transform: translateX(-50%);
@@ -326,20 +336,17 @@
 
         /* --- NEW CHAT STYLES --- */
         #chat-container {
-            position: fixed;
-            right: 0;
-            top: 0;
+            /* Removed fixed positioning for desktop split view */
             width: 300px;
+            /* Default width */
+            flex-shrink: 0;
             height: 100%;
             background-color: var(--secondary-surface);
-            /* Changed to match theme */
             display: flex;
             flex-direction: column;
             border-left: 1px solid #444;
             z-index: 50;
-            transition: transform 0.3s ease-in-out;
-            transition: transform 0.3s ease-in-out;
-            transform: translateX(0);
+            /* No transform animation for resize mode to avoid layout jumping, managed by width/display */
         }
 
         /* --- TABS CSS --- */
@@ -402,7 +409,7 @@
         }
 
         #chat-container.hidden {
-            transform: translateX(100%);
+            display: none !important;
         }
 
         #chat-header {
@@ -521,7 +528,33 @@
             display: none;
         }
 
+        /* --- RESIZABLE CHAT STYLES --- */
+        /* Add resizer cursor */
+        #chat-resizer {
+            width: 5px;
+            background-color: transparent;
+            cursor: ew-resize;
+            flex-shrink: 0;
+            z-index: 100;
+            transition: background-color 0.2s;
+        }
+
+        #chat-resizer:hover,
+        #chat-resizer.active {
+            background-color: var(--primary-accent);
+        }
+
+        #chat-resizer.hidden {
+            display: none;
+        }
+
         @media (max-width: 768px) {
+
+            /* Hide resizer on mobile */
+            #chat-resizer {
+                display: none !important;
+            }
+
             #video-grid {
                 display: grid !important;
                 grid-template-columns: 1fr 1fr !important;
@@ -621,6 +654,8 @@
 
             /* Chat Overlay */
             #chat-container {
+                /* Restore overlay behavior for mobile */
+                position: fixed !important;
                 width: 100% !important;
                 height: 100% !important;
                 top: 0 !important;
@@ -630,6 +665,7 @@
                 z-index: 200 !important;
                 /* Higher than menu button (101) */
                 transform: translateY(100%);
+                border-left: none !important;
             }
 
             #chat-container.hidden {
@@ -652,7 +688,17 @@
                 <div class="username-overlay">You</div>
             </div>
         </div>
+        <!-- Moved controls inside main-content for correct centering -->
+        <div id="controls">
+            <button id="mute-btn">Mute Mic</button>
+            <button id="camera-btn">Turn Camera Off</button>
+            <button id="screen-share-btn">Share Screen</button>
+            <button id="chat-btn" class="active">Chat</button>
+            <button id="hangup-btn">Hang Up</button>
+        </div>
     </main>
+
+    <div id="chat-resizer" class="hidden"></div>
 
     <div id="chat-container" class="hidden">
         <div id="chat-header">
@@ -686,13 +732,7 @@
         </form>
     </div>
 
-    <div id="controls">
-        <button id="mute-btn">Mute Mic</button>
-        <button id="camera-btn">Turn Camera Off</button>
-        <button id="screen-share-btn">Share Screen</button>
-        <button id="chat-btn" class="active">Chat</button>
-        <button id="hangup-btn">Hang Up</button>
-    </div>
+
     <button id="mobile-menu-toggle">Menu</button>
 
     <!-- ADMIN MODAL -->
@@ -789,16 +829,7 @@
             </div>
         </div>
     </div>
-    Limit: <input type="number" id="history-limit-input" min="1" max="500"
-        style="width:50px; padding:2px; background:#333; color:white; border:1px solid #555; text-align:center;">
-    </label>
-    </div>
-    <ul id="history-list" style="list-style: none; padding: 0; max-height: 400px; overflow-y: auto; text-align: left;">
-    </ul>
-    <div class="modal-buttons">
-        <button id="history-clear-all-btn" style="background-color: #d93025;">Clear All</button>
-        <button id="history-close-btn">Close</button>
-    </div>
+
     <div id="status-modal" class="modal-overlay">
         <div class="modal-content" style="max-width: 400px; text-align: left;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
@@ -1291,13 +1322,52 @@
                     // Toggle body class for mobile menu hiding
                     if (!isHidden) {
                         document.body.classList.add('chat-active');
+                        resizer.classList.remove('hidden');
                     } else {
                         document.body.classList.remove('chat-active');
+                        resizer.classList.add('hidden');
                     }
                 }
 
                 chatBtn.addEventListener('click', toggleChat);
                 closeChatBtn.addEventListener('click', toggleChat);
+
+                // --- RESIZER LOGIC ---
+                const resizer = document.getElementById('chat-resizer');
+                let isResizing = false;
+
+                resizer.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    isResizing = true;
+                    resizer.classList.add('active');
+                    document.body.style.cursor = 'ew-resize';
+                });
+
+                document.addEventListener('mousemove', (e) => {
+                    if (!isResizing) return;
+                    e.preventDefault();
+                    let newWidth = window.innerWidth - e.clientX;
+                    // Constraints
+                    if (newWidth < 200) newWidth = 200;
+                    if (newWidth > window.innerWidth * 0.6) newWidth = window.innerWidth * 0.6; // Max 60%
+
+                    chatContainer.style.width = newWidth + 'px';
+                });
+
+                document.addEventListener('mouseup', () => {
+                    if (isResizing) {
+                        isResizing = false;
+                        resizer.classList.remove('active');
+                        document.body.style.cursor = '';
+                    }
+                });
+
+                // Initialize state
+                if (chatContainer.classList.contains('hidden')) {
+                    resizer.classList.add('hidden');
+                } else {
+                    resizer.classList.remove('hidden');
+                }
 
                 document.getElementById('hangup-btn').addEventListener('click', () => { window.location.href = '/'; });
 
@@ -1342,6 +1412,7 @@
 
                 // --- MOBILE MENU TOGGLE ---
                 const mobileMenuBtn = document.getElementById('mobile-menu-toggle');
+                // const controlsDiv = document.getElementById('controls'); // Already defined? Actually no, local scope in previous snippet.
                 const controlsDiv = document.getElementById('controls');
 
                 mobileMenuBtn.addEventListener('click', () => {
