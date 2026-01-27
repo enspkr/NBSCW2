@@ -48,8 +48,8 @@
             grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
             gap: 1rem;
             padding: 1rem;
-            padding-bottom: 120px;
-            box-sizing: border-box;
+            padding: 1rem;
+            /* padding-bottom: 120px; Removed for flex layout */
             transition: all 0.4s ease-in-out;
         }
 
@@ -73,7 +73,7 @@
 
         .video-container.pinned {
             flex-grow: 1;
-            height: 85%;
+            /* height: 85%; REMOVED to allow full expansion */
         }
 
         /* New Error Message Style */
@@ -90,6 +90,10 @@
             align-items: center;
             gap: 0.5rem;
             padding-bottom: 5px;
+        }
+
+        #unpinned-bar:empty {
+            display: none !important;
         }
 
         .video-container.unpinned {
@@ -173,11 +177,15 @@
         }
 
         #controls {
-            position: absolute;
-            /* Changed to absolute to sit inside .main-content */
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
+            /* position: absolute;  REMOVED for desktop flex layout */
+            /* bottom: 20px; REMOVED */
+            /* left: 50%; REMOVED */
+            /* transform: translateX(-50%); REMOVED */
+
+            align-self: center;
+            /* Center in the flex column */
+            margin-bottom: 20px;
+            z-index: 100;
             background-color: var(--secondary-surface);
             padding: 0.75rem;
             display: flex;
@@ -620,6 +628,11 @@
 
             /* Hide default controls on active mobile */
             #controls {
+                position: absolute !important;
+                /* Restore overlay for mobile */
+                left: 50% !important;
+                transform: translateX(-50%) !important;
+
                 display: none !important;
                 bottom: 80px;
                 /* Position above menu button */
@@ -1495,7 +1508,8 @@
                     }
 
                     // Apply smooth scale (maintain centering)
-                    controls.style.transform = `translateX(-50%) scale(${scale})`;
+                    // REMOVED translateX(-50%) because we are now using Flexbox centering (align-self: center)
+                    controls.style.transform = `scale(${scale})`;
                     controls.style.transformOrigin = 'bottom center'; // Scale from bottom to keep aligned
                 }
                 let isResizing = false;
