@@ -199,6 +199,17 @@
             white-space: nowrap;
         }
 
+        /* --- Compact Mode for Wide Chat --- */
+        #controls.compact {
+            padding: 0.5rem;
+            gap: 0.5rem;
+        }
+
+        #controls.compact button {
+            padding: 0.5rem 1rem;
+            font-size: 0.9rem;
+        }
+
         #controls button:hover {
             background-color: #5a5a5a;
         }
@@ -901,7 +912,6 @@
         const localVideo = document.getElementById('local-video');
         const peerConnections = {};
         const audioAnalyzers = {};
-        const remoteGainNodes = {}; // NEW: Store gain nodes for mute control
         let localStream, screenStream;
         let isScreenSharing = false;
 
@@ -917,10 +927,16 @@
                 isDeafened = !isDeafened;
             }
 
-            // Update Global Master Gain
-            if (window.masterGainNode) {
-                window.masterGainNode.gain.value = isDeafened ? 0 : 1;
-            }
+            // Update All Audio Elements (Native Method for iOS Support)
+            document.querySelectorAll('audio.mic-audio').forEach(el => {
+                el.muted = isDeafened;
+            });
+            document.querySelectorAll('video').forEach(el => {
+                // Ensure we don't accidentally mute ourselves if we were unmuted (though local video is usually muted)
+                if (el.id !== 'local-video') {
+                    el.muted = isDeafened;
+                }
+            });
 
             // Update UI
             if (isDeafened) {
@@ -1183,6 +1199,21 @@
                 localVideo.srcObject = localStream;
                 addPinButton(document.getElementById('local-video-container'));
 
+                // --- IOS BACKGROUND AUDIO FIX (Media Session API) ---
+                if ('mediaSession' in navigator) {
+                    navigator.mediaSession.metadata = new MediaMetadata({
+                        title: 'Voice Call',
+                        artist: 'Synapse',
+                        album: 'Active Call',
+                        artwork: []
+                    });
+
+                    // Action handlers needed to activate background audio
+                    navigator.mediaSession.setActionHandler('play', () => { });
+                    navigator.mediaSession.setActionHandler('pause', () => { });
+                    navigator.mediaSession.setActionHandler('stop', () => { });
+                }
+
                 // Initialize Audio Mixing with the Microphone stream
                 setupAudioMixing(localStream);
 
@@ -1437,9 +1468,11 @@
                     if (!isHidden) {
                         document.body.classList.add('chat-active');
                         resizer.classList.remove('hidden');
+                        checkControlsCompact(chatContainer.offsetWidth || 300);
                     } else {
                         document.body.classList.remove('chat-active');
                         resizer.classList.add('hidden');
+                        checkControlsCompact(0);
                     }
                 }
 
@@ -1448,6 +1481,23 @@
 
                 // --- RESIZER LOGIC ---
                 const resizer = document.getElementById('chat-resizer');
+
+                function checkControlsCompact(width) {
+                    const controls = document.getElementById('controls');
+                    const startScaleAt = 300; // Width to start scaling
+                    const maxScaleAt = window.innerWidth * 0.5; // Width where we reach min scale
+                    const minScale = 0.7;
+
+                    let scale = 1;
+                    if (width > startScaleAt) {
+                        const progress = Math.min((width - startScaleAt) / (maxScaleAt - startScaleAt), 1);
+                        scale = 1 - (progress * (1 - minScale));
+                    }
+
+                    // Apply smooth scale (maintain centering)
+                    controls.style.transform = `translateX(-50%) scale(${scale})`;
+                    controls.style.transformOrigin = 'bottom center'; // Scale from bottom to keep aligned
+                }
                 let isResizing = false;
 
                 resizer.addEventListener('mousedown', (e) => {
@@ -1466,6 +1516,7 @@
                     if (newWidth > window.innerWidth * 0.6) newWidth = window.innerWidth * 0.6; // Max 60%
 
                     chatContainer.style.width = newWidth + 'px';
+                    checkControlsCompact(newWidth);
                 });
 
                 document.addEventListener('mouseup', () => {
@@ -2411,9 +2462,10 @@
                 e.stopPropagation(); // Prevent drag from moving window if we had draggable logic, but mainly prevent click passthrough
                 const val = parseFloat(voiceSlider.value);
                 const socketId = videoContainer.id;
-                const gainNode = remoteGainNodes[socketId];
-                if (gainNode) {
-                    gainNode.gain.value = val;
+                // --- Updated for Native Audio ---
+                const audioEl = videoContainer.querySelector('.mic-audio');
+                if (audioEl) {
+                    audioEl.volume = val;
                 }
                 // Update Icon
                 voiceIcon.innerHTML = (val === 0) ? speakerOffIcon : speakerIcon;
@@ -2792,29 +2844,28 @@
                         const micStream = new MediaStream([event.track]);
                         audioEl.srcObject = micStream;
 
-                        // --- Robust Speaking Indicator & Muting via Web Audio ---
+                        // --- Robust Speaking Indicator & Native Audio Fix ---
                         const audioContext = getSharedAudioContext();
-                        // Workaround: Chrome need element muted + playing, but we route audio via API
-                        audioEl.muted = true;
+
+                        // IMPORTANT: For iOS background audio, we MUST let the audio element play naturally.
+                        // do NOT mute the element.
+                        audioEl.muted = false;
+
+                        // We still need the analyser for the visualizer.
+                        // However, we cannot simply .connect(analyser) from the element source 
+                        // because in some browsers that hijacks the output (stopping the speakers).
+                        // But createMediaStreamSource usually allows parallel usage if we don't connect to destination.
 
                         const source = audioContext.createMediaStreamSource(micStream);
-                        const gainNode = audioContext.createGain();
                         const analyser = audioContext.createAnalyser();
                         analyser.fftSize = 256;
 
-                        // Route: Source -> Gain (Per User) -> Analyser -> Master Gain (Global) -> Speakers
-                        source.connect(gainNode);
-                        gainNode.connect(analyser);
+                        // Route: Source -> Analyser (Do NOT connect to destination, let <audio> tag handle output)
+                        source.connect(analyser);
 
-                        // Connect to the global master gain node (created globally once)
-                        if (!window.masterGainNode) {
-                            window.masterGainNode = audioContext.createGain();
-                            window.masterGainNode.connect(audioContext.destination);
-                        }
-                        analyser.connect(window.masterGainNode);
-
-                        // Store GainNode
-                        remoteGainNodes[socketId] = gainNode;
+                        // Remove Remote Gain Node logic for Volume (now handled by audioEl.volume)
+                        // But we might need GainNode if we want to support boosting > 100%, 
+                        // but for now standard volume is fine and safer for iOS.
 
                         const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
