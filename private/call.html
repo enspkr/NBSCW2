@@ -51,12 +51,17 @@
             padding: 1rem;
             /* padding-bottom: 120px; Removed for flex layout */
             transition: all 0.4s ease-in-out;
+            min-height: 0;
+            /* CRITICAL: Allows flex child to shrink below content size */
+            overflow: hidden;
+            /* CRITICAL: Prevents content from spilling out */
         }
 
         #video-grid.pinned-mode {
             display: flex;
             flex-direction: column;
             gap: 0.5rem;
+            overflow: hidden;
         }
 
         .video-container {
@@ -74,6 +79,9 @@
         .video-container.pinned {
             flex-grow: 1;
             /* height: 85%; REMOVED to allow full expansion */
+            min-height: 0;
+            /* Allow it to shrink if needed */
+            width: 100%;
         }
 
         /* New Error Message Style */
