@@ -4,6 +4,8 @@ const http = require('http');
 const { Server } = require("socket.io");
 const path = require('path');
 const os = require('os');
+const fs = require('fs');
+const multer = require('multer');
 const db = require('./database.js');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
@@ -12,6 +14,30 @@ const cookieParser = require('cookie-parser');
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
+
+// --- FILE UPLOAD CONFIGURATION ---
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        cb(null, uploadDir)
+    },
+    filename: function (req, file, cb) {
+        // Sanitize filename to prevent issues
+        // Keep extension, use timestamp + original sanitized name
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        const sanitizedOriginal = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+        cb(null, uniqueSuffix + '-' + sanitizedOriginal)
+    }
+})
+
+const upload = multer({
+    storage: storage,
+    limits: { fileSize: 10000 * 1024 * 1024 } // 10GB limit
+});
 
 // --- LOG BUFFERING ---
 const serverLogs = [];
@@ -318,6 +344,101 @@ io.use((socket, next) => {
         socket.user = decoded;
         next();
     });
+});
+
+
+// --- SERVE PROTECTED FILES ---
+app.get('/uploads/:filename', protectRoute, (req, res) => {
+    const filename = req.params.filename;
+    // Basic Path Traversal Check
+    if (filename.includes('..') || filename.includes('/')) {
+        return res.status(403).send('Forbidden');
+    }
+    const filePath = path.join(uploadDir, filename);
+    if (fs.existsSync(filePath)) {
+        res.sendFile(filePath);
+    } else {
+        res.status(404).send('Not Found');
+    }
+});
+
+app.post('/upload', protectRoute, (req, res) => {
+    upload.single('file')(req, res, (err) => {
+        if (err instanceof multer.MulterError) {
+            // A Multer error occurred when uploading.
+            return res.status(400).json({ error: `Upload error: ${err.message}` });
+        } else if (err) {
+            // An unknown error occurred when uploading.
+            return res.status(500).json({ error: `Unknown error: ${err.message}` });
+        }
+
+        if (!req.file) {
+            return res.status(400).json({ error: 'No file uploaded.' });
+        }
+
+        // Return the URL to access the file
+        res.json({
+            url: `/uploads/${req.file.filename}`,
+            filename: req.file.filename,
+            originalname: req.file.originalname,
+            size: req.file.size
+        });
+    });
+});
+
+app.get('/api/admin/files', protectRoute, (req, res) => {
+    // Check Admin
+    if (req.user.role !== 'admin' && req.user.role !== 'superuser') {
+        return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    fs.readdir(uploadDir, (err, files) => {
+        if (err) return res.status(500).json({ error: 'Failed to scan files' });
+
+        // Get details
+        const fileList = files.map(file => {
+            const filePath = path.join(uploadDir, file);
+            try {
+                const stats = fs.statSync(filePath);
+                return {
+                    name: file,
+                    size: stats.size,
+                    created: stats.birthtime,
+                    url: `/uploads/${file}`
+                };
+            } catch (e) {
+                return null;
+            }
+        }).filter(f => f !== null);
+
+        // Sort by newest first
+        fileList.sort((a, b) => b.created - a.created);
+        res.json(fileList);
+    });
+});
+
+app.delete('/api/admin/files/:filename', protectRoute, (req, res) => {
+    // Check Admin
+    if (req.user.role !== 'admin' && req.user.role !== 'superuser') {
+        return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    const filename = req.params.filename;
+    // Basic sanitization path traversal check
+    if (filename.includes('..') || filename.includes('/')) {
+        return res.status(400).json({ error: 'Invalid filename' });
+    }
+
+    const filePath = path.join(uploadDir, filename);
+
+    if (fs.existsSync(filePath)) {
+        fs.unlink(filePath, (err) => {
+            if (err) return res.status(500).json({ error: 'Failed to delete file' });
+            res.json({ success: true });
+        });
+    } else {
+        res.status(404).json({ error: 'File not found' });
+    }
 });
 
 const activeUsers = {};

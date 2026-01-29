@@ -4,3 +4,4 @@ synapse.db
 chat.db
 *.db
 *env
+uploads/

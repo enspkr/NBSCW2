@@ -305,6 +305,7 @@
 
         .volume-slider {
             -webkit-appearance: none;
+            appearance: none;
             width: 60px;
             height: 4px;
             border-radius: 2px;
@@ -511,9 +512,29 @@
             border-bottom: 1px solid #333;
         }
 
+        /* --- CHAT LINKS --- */
+        #messages a,
+        #system-messages a,
+        .message-list a {
+            color: #4da6ff;
+            /* A nice bright blue */
+            text-decoration: none;
+            font-weight: bold;
+        }
+
+        #messages a:hover,
+        #system-messages a:hover,
+        .message-list a:hover {
+            text-decoration: underline;
+            color: #80c1ff;
+        }
+
         #chat-form {
             padding: 1rem;
             display: flex;
+            gap: 10px;
+            /* Use gap instead of margins */
+            align-items: center;
         }
 
         #chat-input {
@@ -521,9 +542,50 @@
             padding: 0.75rem;
             flex-grow: 1;
             border-radius: 8px;
-            margin-right: 1rem;
+            /* margin-right removed in favor of gap */
             background-color: var(--secondary-surface);
             color: white;
+            min-width: 0;
+            /* Fix flex overflow */
+        }
+
+        #file-btn {
+            background-color: #444;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            padding: 0 1rem;
+            height: 48px;
+            /* Match typical input height */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            transition: background 0.2s;
+        }
+
+        #file-btn:hover {
+            background-color: #555;
+        }
+
+        #send-btn {
+            background-color: var(--primary-accent);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 0 1.2rem;
+            height: 48px;
+            font-size: 1.2rem;
+            cursor: pointer;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #send-btn:hover {
+            background-color: #4d90fe;
         }
 
         .suggestion-item:last-child {
@@ -804,8 +866,12 @@
 
         <div id="command-suggestions"></div>
         <form id="chat-form">
-            <input id="chat-input" autocomplete="off" placeholder="Type a message..." /><button id="send-btn"
-                type="submit">➤</button>
+            <input type="file" id="file-input" style="display: none;" />
+            <input id="chat-input" autocomplete="off" placeholder="Type a message..." />
+            <label for="file-input" id="file-btn" title="Upload File">
+                📎
+            </label>
+            <button id="send-btn" type="submit">➤</button>
         </form>
     </div>
 
@@ -843,6 +909,8 @@
             </div>
 
             <div class="modal-buttons">
+                <button id="admin-manage-files-btn" style="background-color: #007acc; margin-right: 10px;">Manage
+                    Files</button>
                 <button id="admin-close-btn">Close</button>
             </div>
         </div>
@@ -864,6 +932,26 @@
             </div>
             <div class="modal-buttons">
                 <button id="admin-user-list-close-btn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ADMIN FILES MODAL -->
+    <div id="admin-files-modal" class="modal-overlay">
+        <div class="modal-content" style="max-width: 700px; height: 80vh; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <h3>Manage Uploaded Files</h3>
+                <span id="admin-files-close-btn" class="close-btn">&times;</span>
+            </div>
+            <div class="modal-body" style="flex: 1; overflow: hidden; display: flex; flex-direction: column;">
+                <div style="margin-bottom: 10px;">
+                    <button id="admin-files-refresh-btn" style="padding: 5px 10px; cursor: pointer;">Refresh
+                        List</button>
+                </div>
+                <div id="admin-files-list"
+                    style="flex: 1; overflow-y: auto; background: #222; border: 1px solid #444; padding: 10px;">
+                    <!-- Copulated via JS -->
+                </div>
             </div>
         </div>
     </div>
@@ -2195,7 +2283,7 @@
                     const sanitizedMessage = tempDiv.textContent;
 
                     // Regular expression to find URLs in the message text
-                    const urlRegex = /(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])|(\bwww\.[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+
 
                     // Replace found URLs with clickable <a> tags
                     // Since we are running this on the sanitized text, it is safe-ish, 
@@ -2206,24 +2294,69 @@
                     // No, textContent doesn't escape for us if we read it back.
                     // Actually, let's just use a safer approach:
 
-                    const messageContent = document.createElement('span');
 
-                    // Split text by URLs and append text nodes or anchor tags
-                    const parts = sanitizedMessage.split(urlRegex);
-                    // The split with capturing groups is tricky.
-                    // Let's use a simpler approach: Just textContent the username, then innerHTML the linked message
-                    // but we need to ESCAPE the message first.
 
                     // escapeHtml is now global
 
 
                     const safeMessage = escapeHtml(message);
-                    const processedMessage = safeMessage.replace(urlRegex, (url) => {
+
+                    // 1. Process Markdown Links: [text](url)
+                    // We need to be careful not to double-escape or break things. 
+                    // Matches [text](url) where url allows specific protocol chars.
+                    const markdownRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+|ftp:\/\/[^\s)]+|file:\/\/[^\s)]+|\/uploads\/[^\s)]+)\)/g;
+
+                    let processedMessage = safeMessage.replace(markdownRegex, (match, text, url) => {
+                        return `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+                    });
+
+                    // 2. Process Raw URLs (Fallback for old messages/plain links)
+                    // We must avoid matching URLs that are already inside href attributes from step 1.
+                    // A simple lookbehind or check is hard in regex. 
+                    // Strategy: We can temporarily replace our valid tags with placeholders, process URLs, then restore.
+                    // OR: Use a regex that ignores things inside quotes/tags.
+                    // Given the simplicity, let's just match raw URLs that are NOT preceded by "href=\"" or ">".
+                    // But JS regex lookbehind is not always supported in all target environments (though modern browsers are fine).
+                    // Simpler approach: Split by the tags we just created? 
+                    // Actually, if we just run the URL regex *on parts that are not tags*, it works.
+
+                    // Let's refine the URL regex to be strict about word boundaries.
+                    const urlRegex = /(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])|(\bwww\.[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+
+                    // A safer way if we control the input (we do, sort of)
+                    // Let's just run URL regex on text that DOESN'T look like our replacement.
+                    // But wait, if Step 1 replaced it, it is now HTML.
+
+                    // Alternative: construct the logic so we don't need complex exclusion.
+                    // If the message is EXACTLY a markdown link, we are good.
+                    // If it contains mixed content, we might double link if the text part is a URL.
+
+                    // For this task, "only show the file name in the chat as link" implies new uploads use the format.
+                    // Existing URLs should still work.
+                    // Let's stick to a simpler sequencing:
+                    // If we matched markdown, we assume that was the intent. 
+                    // If we didn't match markdown in a segment, check for URL.
+
+                    // Re-running replace on the whole string is risky for already replaced <a> tags.
+                    // So let's use a tokenization approach for safety? 
+                    // Or just a negative lookbehind if supported. 
+
+                    // Simplest safe Hack: Replace our generated <a href...> with a unique token, do URL replacement, then swap back.
+                    const placeholders = [];
+                    processedMessage = processedMessage.replace(/<a href="[^"]+"[^>]*>.*?<\/a>/g, (match) => {
+                        placeholders.push(match);
+                        return `__LINK_PLACEHOLDER_${placeholders.length - 1}__`;
+                    });
+
+                    processedMessage = processedMessage.replace(urlRegex, (url) => {
                         let href = url;
-                        if (!href.startsWith('http')) {
-                            href = `http://${href}`;
-                        }
+                        if (!href.startsWith('http')) href = `http://${href}`;
                         return `<a href="${href}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+                    });
+
+                    // Restore
+                    processedMessage = processedMessage.replace(/__LINK_PLACEHOLDER_(\d+)__/g, (match, index) => {
+                        return placeholders[index];
                     });
 
                     // --- TABBED CHAT LOGIC ---
@@ -2447,6 +2580,175 @@
                     messages.innerHTML = '';
                     messages.lastDate = null; // Reset date tracking
                 });
+
+                // --- FILE UPLOAD LOGIC ---
+                const fileInput = document.getElementById('file-input');
+                const fileBtn = document.getElementById('file-btn');
+
+                if (fileBtn) {
+                    fileBtn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        fileInput.click();
+                    });
+                }
+
+                if (fileInput) {
+                    fileInput.addEventListener('change', async () => {
+                        const file = fileInput.files[0];
+                        if (!file) return;
+
+                        // Create FormData
+                        const formData = new FormData();
+                        formData.append('file', file);
+
+                        // Notify uploading
+                        addChatMessage({ username: 'System', message: 'Uploading ' + file.name + '...' });
+
+                        try {
+                            const response = await fetch('/upload', {
+                                method: 'POST',
+                                body: formData
+                            });
+
+                            if (!response.ok) throw new Error('Upload failed');
+                            const result = await response.json();
+
+                            // Check type
+                            const ext = result.filename.split('.').pop().toLowerCase();
+                            // const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
+
+                            let msgText = `[${result.originalname}](${result.url})`;
+
+                            // Emit to public or private depending on active tab?
+                            // "lets file sharing to the chat" -> ambiguous.
+                            // Usually chat message handles it.
+                            // My code below uses socket.emit('chat message', msgText); which is PUBLIC.
+                            // We should respect the active tab if possible.
+                            // Existing chat input logic:
+                            // if (activeTab !== 'public' && activeTab !== 'system') { ... }
+
+                            if (typeof activeTab !== 'undefined' && activeTab !== 'public' && activeTab !== 'system') {
+                                socket.emit('private message', { to: activeTab, message: msgText });
+                                myMessageHistory.push({ text: msgText, timestamp: Date.now() });
+                                saveInputHistory();
+                                // addChatMessage handled by emission echo or manual add?
+                                // Original logic manually adds it?
+                                // line 2083: myMessageHistory.push...
+                                // It does NOT manually add it to UI? 
+                                // Wait, line 2059 (socket.emit) -> receive echo?
+                                // Private message: line 259 in server emits to sender with isSelf=true. 
+                                // So frontend receives it and adds it.
+                            } else if (activeTab === 'system') {
+                                addChatMessage({ username: 'Note', message: msgText });
+                                myMessageHistory.push({ text: msgText, timestamp: Date.now() });
+                                saveInputHistory();
+                            } else {
+                                socket.emit('chat message', msgText);
+                                myMessageHistory.push({ text: msgText, timestamp: Date.now() });
+                                saveInputHistory();
+                            }
+
+                        } catch (err) {
+                            console.error(err);
+                            addChatMessage({ username: 'System', message: 'Error uploading file.' });
+                        }
+
+                        // Reset input
+                        fileInput.value = '';
+                    });
+                }
+
+                // --- ADMIN FILES LOGIC ---
+                const adminFilesModal = document.getElementById('admin-files-modal');
+                const adminFilesList = document.getElementById('admin-files-list');
+                const adminFilesClose = document.getElementById('admin-files-close-btn');
+                const adminFilesRefresh = document.getElementById('admin-files-refresh-btn');
+                const adminManageFilesBtn = document.getElementById('admin-manage-files-btn');
+
+                if (adminManageFilesBtn) {
+                    adminManageFilesBtn.addEventListener('click', () => {
+                        document.getElementById('admin-modal').classList.remove('visible');
+                        openAdminFilesModal();
+                    });
+                }
+
+                function openAdminFilesModal() {
+                    adminFilesModal.style.display = 'flex';
+                    fetchFiles();
+                }
+
+                if (adminFilesClose) adminFilesClose.onclick = () => adminFilesModal.style.display = 'none';
+                if (adminFilesRefresh) adminFilesRefresh.onclick = () => fetchFiles();
+
+                // We need to attach to window.onclick but carefully, or listener on modal
+                if (adminFilesModal) {
+                    adminFilesModal.onclick = (e) => {
+                        if (e.target === adminFilesModal) adminFilesModal.style.display = 'none';
+                    };
+                }
+
+                async function fetchFiles() {
+                    try {
+                        const res = await fetch('/api/admin/files');
+                        if (res.status === 403) return alert("Unauthorized");
+                        const files = await res.json();
+                        renderFileList(files);
+                    } catch (e) {
+                        console.error(e);
+                        adminFilesList.innerHTML = '<div style="color:red">Error fetching files</div>';
+                    }
+                }
+
+                function renderFileList(files) {
+                    if (files.length === 0) {
+                        adminFilesList.innerHTML = '<div style="color:#888; text-align:center">No files found.</div>';
+                        return;
+                    }
+                    adminFilesList.innerHTML = '';
+                    files.forEach(f => {
+                        const div = document.createElement('div');
+                        div.style.display = 'flex';
+                        div.style.justifyContent = 'space-between';
+                        div.style.padding = '8px';
+                        div.style.borderBottom = '1px solid #333';
+                        div.style.alignItems = 'center';
+
+                        const info = document.createElement('div');
+                        info.innerHTML = `
+                             <a href="${f.url}" target="_blank" style="color:#007acc; font-weight:bold;">${f.name}</a>
+                             <br>
+                             <span style="font-size:0.8em; color:#aaa;">${(f.size / 1024).toFixed(1)} KB - ${new Date(f.created).toLocaleString()}</span>
+                         `;
+
+                        const delBtn = document.createElement('button');
+                        delBtn.textContent = 'Delete';
+                        delBtn.style.backgroundColor = '#d93025';
+                        delBtn.style.color = 'white';
+                        delBtn.style.border = 'none';
+                        delBtn.style.padding = '5px 10px';
+                        delBtn.style.borderRadius = '4px';
+                        delBtn.style.cursor = 'pointer';
+                        delBtn.onclick = () => deleteFile(f.name);
+
+                        div.appendChild(info);
+                        div.appendChild(delBtn);
+                        adminFilesList.appendChild(div);
+                    });
+                }
+
+                async function deleteFile(filename) {
+                    if (!confirm(`Are you sure you want to delete ${filename}?`)) return;
+                    try {
+                        const res = await fetch(`/api/admin/files/${filename}`, { method: 'DELETE' });
+                        if (res.ok) {
+                            fetchFiles();
+                        } else {
+                            alert("Failed to delete");
+                        }
+                    } catch (e) {
+                        alert("Error deleting file");
+                    }
+                }
 
             } catch (err) {
                 console.error("Fatal Error:", err);
@@ -2991,25 +3293,7 @@
 
         main();
 
-        // --- TAB SWITCHING LOGIC ---
-        const tabChat = document.getElementById('tab-chat');
-        const tabSystem = document.getElementById('tab-system');
-        const listChat = document.getElementById('messages');
-        const listSystem = document.getElementById('system-messages');
 
-        tabChat.onclick = () => {
-            tabChat.classList.add('active');
-            tabSystem.classList.remove('active');
-            listChat.style.display = 'block';
-            listSystem.style.display = 'none';
-        };
-
-        tabSystem.onclick = () => {
-            tabSystem.classList.add('active');
-            tabChat.classList.remove('active');
-            listChat.style.display = 'none';
-            listSystem.style.display = 'block';
-        };
 
 
     </script>
