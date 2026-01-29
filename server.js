@@ -81,6 +81,10 @@ const JWT_SECRET = process.env.JWT_SECRET || 'a-default-secret-for-local-testing
 
 app.use(express.json());
 app.use(cookieParser());
+app.use((req, res, next) => {
+    console.log(`[REQUEST] ${req.method} ${req.url}`);
+    next();
+});
 app.use(express.static(path.join(__dirname, 'public')));
 
 const protectRoute = (req, res, next) => {
